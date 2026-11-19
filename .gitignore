@@ -225,3 +225,6 @@ __marimo__/
 # Assessment materials (not for publication)
 data/
 docs/
+
+# Plotly iframe renderer output
+iframe_figures/
