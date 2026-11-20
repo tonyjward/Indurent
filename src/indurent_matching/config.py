@@ -37,3 +37,9 @@ MAJOR_CITIES = {
     "Coventry": (52.4068, -1.5197),
     "Bradford": (53.7960, -1.7594),
 }
+
+# --- Doors (EDA 2.6) --------------------------------------------------------------------------------------------
+# A typical standalone shed has about one door per 9,000 sq ft. Fewer than this many sq ft per door is implausibly
+# dense (Opal Forge 42 has one per ~1,200; listing M4 one per ~40), so the door count is flagged as doubtful.
+# Applied only where the count is the unit's own, not a copied estate total.
+MIN_SQFT_PER_DOOR = 2_000

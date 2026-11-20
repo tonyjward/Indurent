@@ -20,6 +20,10 @@ similarity; that exclusion lives in the similarity code, not here.
 
 Step 5 (EDA 2.5): zero eaves mean "not recorded" and become missing; each side is kept where recorded.
 
+Step 6 (EDA 2.6): zero doors become missing; a door count copied across a multi-unit estate is an estate total,
+so it is marked as not describing the unit and given a per-unit estimate for context. A unit's own count that
+is implausibly dense for its size is flagged as doubtful.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
@@ -33,7 +37,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from indurent_matching.config import MIN_PLAUSIBLE_SQFT, VERY_LARGE_SQFT
+from indurent_matching.config import MIN_PLAUSIBLE_SQFT, MIN_SQFT_PER_DOOR, VERY_LARGE_SQFT
 from indurent_matching.geo import assess_locations, nearest_city
 
 # Columns parsed as numbers, under their snake_case names. size_sqm holds square feet (EDA 2.1); it is renamed
@@ -193,6 +197,52 @@ def clean_eaves(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 6 (EDA 2.6): zero doors become missing; separate unit door counts from copied estate totals.
+
+    Adds ``doors_describe_unit``: True where the door count is the building's own, so similarity may use it.
+    In a multi-unit estate where every unit shows the same count, the figure is an estate total copied onto each
+    unit (it tracks estate size, not unit size), so it is False there. Those units also get
+    ``doors_per_unit_estimate`` (estate total / units in the estate) and a note, for display and explanation
+    only: the estimate rests on the estate-total reading and ignores unit size, so it is never scored.
+
+    Multi-unit estates whose units show different counts (Crimson Quay 31, Topaz Arc 37) have counts that rise
+    with unit size, so they are treated as the units' own. Listings have no estate structure; marketing particulars
+    describe the unit for sale, so their counts are treated as their own. Missing doors get no note.
+
+    Adds ``doors_doubtful`` where a unit's own count gives fewer than ``MIN_SQFT_PER_DOOR`` sq ft per door. This
+    general rule also covers new listings, which the known-issues register (step 8) can't.
+    """
+    df = df.copy()
+    df["doors"] = df["doors"].mask(df["doors"] == 0)
+    df["doors_per_unit_estimate"] = np.nan
+    if "estate_units" in df:
+        same_count = df.groupby("industrial_estate_name")["doors"].transform("nunique") == 1
+        estate_total = (df["estate_units"] > 1) & same_count & df["doors"].notna()
+        df["doors_describe_unit"] = ~estate_total
+        df.loc[estate_total, "doors_per_unit_estimate"] = df["doors"] / df["estate_units"]
+        _add_note(
+            df,
+            estate_total,
+            "doors: {doors:.0f} is an estate total across {estate_units} units (about {doors_per_unit_estimate:.1f} "
+            "per unit), not this unit's own count",
+        )
+    else:  # marketed listings
+        df["doors_describe_unit"] = True
+
+    sqft_per_door = df["size_sqft"] / df["doors"]
+    too_dense = df["doors_describe_unit"] & (sqft_per_door < MIN_SQFT_PER_DOOR)
+    df["doors_doubtful"] = too_dense
+    df["_sqft_per_door"] = sqft_per_door
+    _add_note(
+        df,
+        too_dense,
+        "doors: {doors:.0f} on {size_sqft:,.0f} sq ft (about {_sqft_per_door:,.0f} sq ft per door) is implausibly "
+        "dense, so doubtful",
+    )
+    return df.drop(columns="_sqft_per_door")
+
+
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the cleaning steps shared by both files, in EDA order."""
     df = _parse_numeric(df)
@@ -203,6 +253,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     df = clean_location(df)
     df = clean_build_year(df)
     df = clean_eaves(df)
+    df = clean_doors(df)
     return df
 
 
@@ -220,11 +271,12 @@ def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_portfolio(path: str | Path) -> pd.DataFrame:
     """Load the portfolio file: one row per unit, keyed by the integer ``property_id``."""
-    df = _clean(_read(Path(path)))
+    df = _read(Path(path))
     if df["property_id"].isna().any() or not df["property_id"].is_unique:
         raise ValueError("portfolio property_id must be present and unique")
     df["property_id"] = df["property_id"].astype(int)
-    return add_estate_structure(df).set_index("property_id", drop=False)
+    df = _clean(add_estate_structure(df))  # estate structure first: the doors step needs it
+    return df.set_index("property_id", drop=False)
 
 
 def load_marketed(path: str | Path) -> pd.DataFrame:

@@ -11,6 +11,7 @@ import pytest
 from indurent_matching.data import (
     add_estate_structure,
     clean_build_year,
+    clean_doors,
     clean_eaves,
     clean_size,
     parse_number,
@@ -103,6 +104,61 @@ def test_eaves_after_cleaning(portfolio):
     assert not (portfolio[["min_eaves_m", "max_eaves_m"]] == 0).any().any()
     both = portfolio["min_eaves_m"].notna() & portfolio["max_eaves_m"].notna()
     assert both.sum() == 277  # units with both recorded (EDA 2.5)
+
+
+def _doors_frame(estates, doors, size=10_000.0):
+    df = add_estate_structure(pd.DataFrame({"industrial_estate_name": estates, "doors": doors, "size_sqft": size}))
+    df["quality_notes"] = [[] for _ in range(len(df))]
+    return df
+
+
+def test_clean_doors_estate_total_vs_unit_count():
+    out = clean_doors(
+        _doors_frame(
+            ["A", "A", "A", "B", "C", "C", "D"],  # A: copied total; B: single unit; C: differing counts; D: zero
+            [6.0, 6.0, 6.0, 4.0, 3.0, 9.0, 0.0],
+        )
+    )
+    assert out["doors_describe_unit"].tolist() == [False, False, False, True, True, True, True]
+    assert out["doors_per_unit_estimate"].iloc[0] == 2.0  # 6 doors / 3 units
+    assert out["doors_per_unit_estimate"].iloc[3:].isna().all()
+    assert np.isnan(out["doors"].iloc[6])  # zero means not recorded
+    assert out["quality_notes"].iloc[0] == [
+        "doors: 6 is an estate total across 3 units (about 2.0 per unit), not this unit's own count"
+    ]
+    assert out["quality_notes"].iloc[4] == []
+
+
+def test_clean_doors_density_check():
+    # B: 4 doors on 1,000 sq ft (250 per door) is too dense; A: an estate total is never checked; C: plausible.
+    df = _doors_frame(["A", "A", "B", "C"], [40.0, 40.0, 4.0, 4.0])
+    df["size_sqft"] = [1_000.0, 1_000.0, 1_000.0, 40_000.0]
+    out = clean_doors(df)
+    assert out["doors_doubtful"].tolist() == [False, False, True, False]
+    assert out["quality_notes"].iloc[2] == [
+        "doors: 4 on 1,000 sq ft (about 250 sq ft per door) is implausibly dense, so doubtful"
+    ]
+    assert "_sqft_per_door" not in out.columns
+
+
+def test_clean_doors_listings_count_as_their_own():
+    df = pd.DataFrame({"doors": [2.0, 0.0], "size_sqft": [20_000.0, 20_000.0]})
+    df["quality_notes"] = [[] for _ in range(len(df))]
+    out = clean_doors(df)
+    assert out["doors_describe_unit"].all()
+    assert np.isnan(out["doors"].iloc[1])
+
+
+def test_doors_after_cleaning(portfolio, marketed):
+    estate_total = ~portfolio["doors_describe_unit"]
+    assert portfolio.loc[estate_total, "industrial_estate_name"].nunique() == 30  # EDA 2.6: 30 of 32 estates
+    assert portfolio.loc[portfolio["industrial_estate_name"] == "Ruby Arc 89", "doors_per_unit_estimate"].iloc[
+        0
+    ] == pytest.approx(27 / 21)
+    assert portfolio.loc[portfolio["industrial_estate_name"] == "Crimson Quay 31", "doors_describe_unit"].all()
+    assert not (portfolio["doors"] == 0).any()
+    assert marketed["doors_describe_unit"].all()
+    assert marketed["doors_doubtful"].tolist() == [False, False, False, True, False]  # M4: 16 doors on 617 sq ft
 
 
 def test_load_portfolio(portfolio):
