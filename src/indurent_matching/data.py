@@ -18,6 +18,8 @@ Step 4 (EDA 2.4): car parking needs no cleaning beyond step 0's parsing. It is a
 every unit of an estate) that doesn't track unit size, so it is kept for filtering and context but not used for
 similarity; that exclusion lives in the similarity code, not here.
 
+Step 5 (EDA 2.5): zero eaves mean "not recorded" and become missing; each side is kept where recorded.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
@@ -174,6 +176,23 @@ def clean_build_year(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def clean_eaves(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 5 (EDA 2.5): treat zero eaves as "not recorded".
+
+    About 30% of each column is zero, and no actual warehouse has 0 m eaves. Min and max are cleaned separately, so a
+    unit with only one side recorded keeps it. Once zeros are missing, no unit has min above max (the 49 raw cases
+    were all max = 0), so nothing is swapped.
+
+    Eaves are copied across most multi-unit estates, but unlike doors they stay a feature for every unit: units
+    built together plausibly share a height, whereas one door count across units of very different sizes doesn't.
+    Missing eaves get no note; similarity reports which features each match rested on.
+    """
+    df = df.copy()
+    for col in ["min_eaves_m", "max_eaves_m"]:
+        df[col] = df[col].mask(df[col] == 0)
+    return df
+
+
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the cleaning steps shared by both files, in EDA order."""
     df = _parse_numeric(df)
@@ -183,6 +202,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     df = clean_size(df)
     df = clean_location(df)
     df = clean_build_year(df)
+    df = clean_eaves(df)
     return df
 
 

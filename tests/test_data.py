@@ -11,6 +11,7 @@ import pytest
 from indurent_matching.data import (
     add_estate_structure,
     clean_build_year,
+    clean_eaves,
     clean_size,
     parse_number,
     snake_case,
@@ -87,6 +88,21 @@ def test_build_year_counts(portfolio, marketed):
     assert portfolio["build_year"].isna().sum() == 16  # EDA 2.3
     assert portfolio["build_year"].dropna().between(1939, 2022).all()
     assert "no build year, so age can't be compared" in marketed.loc["M2", "quality_notes"]  # Tech Hub
+
+
+def test_clean_eaves_zero_is_missing_each_side_kept():
+    df = pd.DataFrame({"min_eaves_m": [0.0, 6.0, 0.0, 5.0], "max_eaves_m": [0.0, 0.0, 8.0, 7.0]})
+    out = clean_eaves(df)
+    assert out["min_eaves_m"].isna().tolist() == [True, False, True, False]
+    assert out["max_eaves_m"].isna().tolist() == [True, True, False, False]
+    assert out.loc[1, "min_eaves_m"] == 6.0  # recorded side kept when the other is zero
+
+
+def test_eaves_after_cleaning(portfolio):
+    assert not (portfolio["min_eaves_m"] > portfolio["max_eaves_m"]).any()  # no swaps needed (EDA 2.5)
+    assert not (portfolio[["min_eaves_m", "max_eaves_m"]] == 0).any().any()
+    both = portfolio["min_eaves_m"].notna() & portfolio["max_eaves_m"].notna()
+    assert both.sum() == 277  # units with both recorded (EDA 2.5)
 
 
 def test_load_portfolio(portfolio):
