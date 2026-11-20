@@ -12,6 +12,8 @@ Step 1 (EDA 2.1): size is square feet; flag implausibly small units, note very l
 Step 2 (EDA 2.2, section 5): location confidence from the coastline and labelled-region checks, the region the
 coordinates fall in, and the nearest major city (trusted locations only). See ``geo.py``.
 
+Step 3 (EDA 2.3): build year is left missing where blank (no filling from the estate) and noted.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
@@ -157,6 +159,17 @@ def clean_location(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def clean_build_year(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 3 (EDA 2.3): note missing build years; leave them missing.
+
+    Units in the same estate differ by about 30 years (median), so filling a blank from the estate would be a
+    guess. A unit without a build year simply has no age comparison.
+    """
+    df = df.copy()
+    _add_note(df, df["build_year"].isna(), "no build year, so age can't be compared")
+    return df
+
+
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the cleaning steps shared by both files, in EDA order."""
     df = _parse_numeric(df)
@@ -165,6 +178,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     ]  # starts an empty list placeholder for every row, later steps append to it using _add_note
     df = clean_size(df)
     df = clean_location(df)
+    df = clean_build_year(df)
     return df
 
 

@@ -10,6 +10,7 @@ import pytest
 
 from indurent_matching.data import (
     add_estate_structure,
+    clean_build_year,
     clean_size,
     parse_number,
     snake_case,
@@ -72,6 +73,20 @@ def test_clean_size():
     assert out["quality_notes"].iloc[5] == ["size 700,000 sq ft: very large (over 600,000 sq ft); rare but plausible"]
     assert out["quality_notes"].iloc[4] == []  # 600,000 exactly is not "over"
     assert not out["size_sqft_doubtful"].iloc[5]  # very large is a note, not a flag
+
+
+def test_clean_build_year():
+    df = pd.DataFrame({"build_year": [1995.0, np.nan]})
+    df["quality_notes"] = [[] for _ in range(len(df))]
+    out = clean_build_year(df)
+    assert out["build_year"].iloc[0] == 1995.0 and np.isnan(out["build_year"].iloc[1])  # not filled
+    assert out["quality_notes"].tolist() == [[], ["no build year, so age can't be compared"]]
+
+
+def test_build_year_counts(portfolio, marketed):
+    assert portfolio["build_year"].isna().sum() == 16  # EDA 2.3
+    assert portfolio["build_year"].dropna().between(1939, 2022).all()
+    assert "no build year, so age can't be compared" in marketed.loc["M2", "quality_notes"]  # Tech Hub
 
 
 def test_load_portfolio(portfolio):

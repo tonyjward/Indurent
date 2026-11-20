@@ -73,4 +73,4 @@ def test_marketed_locations(marketed):
     }
     assert df.loc["M1", "derived_region"] == "Wales"  # labelled North West
     assert any("27 km offshore" in n for n in df.loc["M5", "quality_notes"])  # Chancery Depot
-    assert df.loc["M2", "quality_notes"] == ["no coordinates, so location can't be used"]  # Tech Hub
+    assert "no coordinates, so location can't be used" in df.loc["M2", "quality_notes"]  # Tech Hub
