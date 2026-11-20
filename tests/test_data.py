@@ -130,11 +130,12 @@ def test_clean_doors_estate_total_vs_unit_count():
 
 
 def test_clean_doors_density_check():
-    # B: 4 doors on 1,000 sq ft (250 per door) is too dense; A: an estate total is never checked; C: plausible.
-    df = _doors_frame(["A", "A", "B", "C"], [40.0, 40.0, 4.0, 4.0])
-    df["size_sqft"] = [1_000.0, 1_000.0, 1_000.0, 40_000.0]
+    # B: 4 doors on 1,000 sq ft (250 per door) is too dense; A: an estate total is never checked; C: plausible;
+    # D: 3 doors on 1,000 sq ft is dense too, but a count of 3 or fewer is never flagged.
+    df = _doors_frame(["A", "A", "B", "C", "D"], [40.0, 40.0, 4.0, 4.0, 3.0])
+    df["size_sqft"] = [1_000.0, 1_000.0, 1_000.0, 40_000.0, 1_000.0]
     out = clean_doors(df)
-    assert out["doors_doubtful"].tolist() == [False, False, True, False]
+    assert out["doors_doubtful"].tolist() == [False, False, True, False, False]
     assert out["quality_notes"].iloc[2] == [
         "doors: 4 on 1,000 sq ft (about 250 sq ft per door) is implausibly dense, so doubtful"
     ]
@@ -159,6 +160,9 @@ def test_doors_after_cleaning(portfolio, marketed):
     assert not (portfolio["doors"] == 0).any()
     assert marketed["doors_describe_unit"].all()
     assert marketed["doors_doubtful"].tolist() == [False, False, False, True, False]  # M4: 16 doors on 617 sq ft
+    flagged = portfolio.loc[portfolio["doors_doubtful"], "industrial_estate_name"]
+    assert "Opal Forge 42" in flagged.values and "Granite Summit 84" in flagged.values
+    assert "Granite Depot 69" not in flagged.values  # 3 doors on ~4,000 sq ft: plausible (EDA 2.6)
 
 
 def test_load_portfolio(portfolio):

@@ -43,3 +43,6 @@ MAJOR_CITIES = {
 # dense (Opal Forge 42 has one per ~1,200; listing M4 one per ~40), so the door count is flagged as doubtful.
 # Applied only where the count is the unit's own, not a copied estate total.
 MIN_SQFT_PER_DOOR = 2_000
+# A few doors on a small unit is normal (Granite Depot 69: 3 doors on ~4,000 sq ft, judged plausible in EDA 2.6), so
+# the density check applies only above this many doors.
+MAX_DOORS_ALWAYS_PLAUSIBLE = 3

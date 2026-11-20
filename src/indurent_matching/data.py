@@ -37,7 +37,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from indurent_matching.config import MIN_PLAUSIBLE_SQFT, MIN_SQFT_PER_DOOR, VERY_LARGE_SQFT
+from indurent_matching.config import (
+    MAX_DOORS_ALWAYS_PLAUSIBLE,
+    MIN_PLAUSIBLE_SQFT,
+    MIN_SQFT_PER_DOOR,
+    VERY_LARGE_SQFT,
+)
 from indurent_matching.geo import assess_locations, nearest_city
 
 # Columns parsed as numbers, under their snake_case names. size_sqm holds square feet (EDA 2.1); it is renamed
@@ -210,8 +215,9 @@ def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
     with unit size, so they are treated as the units' own. Listings have no estate structure; marketing particulars
     describe the unit for sale, so their counts are treated as their own. Missing doors get no note.
 
-    Adds ``doors_doubtful`` where a unit's own count gives fewer than ``MIN_SQFT_PER_DOOR`` sq ft per door. This
-    general rule also covers new listings, which the known-issues register (step 8) can't.
+    Adds ``doors_doubtful`` where a unit's own count gives fewer than ``MIN_SQFT_PER_DOOR`` sq ft per door, unless
+    the count is ``MAX_DOORS_ALWAYS_PLAUSIBLE`` or fewer (a few doors on a small unit is normal). This general rule
+    also covers new listings, which the known-issues register (step 8) can't.
     """
     df = df.copy()
     df["doors"] = df["doors"].mask(df["doors"] == 0)
@@ -231,7 +237,9 @@ def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
         df["doors_describe_unit"] = True
 
     sqft_per_door = df["size_sqft"] / df["doors"]
-    too_dense = df["doors_describe_unit"] & (sqft_per_door < MIN_SQFT_PER_DOOR)
+    too_dense = (
+        df["doors_describe_unit"] & (df["doors"] > MAX_DOORS_ALWAYS_PLAUSIBLE) & (sqft_per_door < MIN_SQFT_PER_DOOR)
+    )
     df["doors_doubtful"] = too_dense
     df["_sqft_per_door"] = sqft_per_door
     _add_note(
