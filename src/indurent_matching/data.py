@@ -14,6 +14,10 @@ coordinates fall in, and the nearest major city (trusted locations only). See ``
 
 Step 3 (EDA 2.3): build year is left missing where blank (no filling from the estate) and noted.
 
+Step 4 (EDA 2.4): car parking needs no cleaning beyond step 0's parsing. It is an estate-level figure (the same on
+every unit of an estate) that doesn't track unit size, so it is kept for filtering and context but not used for
+similarity; that exclusion lives in the similarity code, not here.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
