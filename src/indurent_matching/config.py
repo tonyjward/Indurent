@@ -46,3 +46,27 @@ MIN_SQFT_PER_DOOR = 2_000
 # A few doors on a small unit is normal (Granite Depot 69: 3 doors on ~4,000 sq ft, judged plausible in EDA 2.6), so
 # the density check applies only above this many doors.
 MAX_DOORS_ALWAYS_PLAUSIBLE = 3
+
+# --- Known issues (EDA 2.8, 2.9) --------------------------------------------------------------------------------
+# Findings tied to particular Property Ids in this file, which no general rule can express: these fields are flagged
+# as doubtful for these units, where a value is recorded. Review this list whenever the portfolio data is refreshed.
+KNOWN_ISSUES = [
+    {
+        # Small units carry a big shed's eaves, doors and yard depth, and big units a small one's: the eaves-size
+        # correlation reverses inside the block (-0.67 vs +0.62 elsewhere). Size is kept: its total matches
+        # Indurent's published figure (EDA 2.1).
+        "property_ids": range(1173, 1188),
+        "fields": ["doors", "min_eaves_m", "max_eaves_m", "yard_depth_m"],
+        "reason": "in a block of records (Property Ids 1173-1187) whose specs look attached to the wrong units",
+    },
+    {
+        # Granite Mews 59: 2.1-2.4 m eaves on every unit, build years 1939-1953, EPC A on three of them.
+        "property_ids": range(259, 264),
+        "fields": ["min_eaves_m", "max_eaves_m", "build_year"],
+        "reason": "Granite Mews 59's record doesn't hang together (house-height eaves, 1940s build, EPC A)",
+    },
+]
+
+# --- EPC (EDA 2.9, 4.2) -----------------------------------------------------------------------------------------
+# Valid ratings; anything else (the 7 Excel FALSE cells) becomes missing.
+EPC_RATINGS = ["A", "B", "C", "D", "E", "F", "G"]

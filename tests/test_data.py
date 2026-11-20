@@ -10,9 +10,11 @@ import pytest
 
 from indurent_matching.data import (
     add_estate_structure,
+    apply_known_issues,
     clean_build_year,
     clean_doors,
     clean_eaves,
+    clean_epc,
     clean_size,
     parse_number,
     snake_case,
@@ -163,6 +165,45 @@ def test_doors_after_cleaning(portfolio, marketed):
     flagged = portfolio.loc[portfolio["doors_doubtful"], "industrial_estate_name"]
     assert "Opal Forge 42" in flagged.values and "Granite Summit 84" in flagged.values
     assert "Granite Depot 69" not in flagged.values  # 3 doors on ~4,000 sq ft: plausible (EDA 2.6)
+
+
+def test_apply_known_issues():
+    # Units 1 and 2 are in the register; unit 2 has no door count, so only its eaves are flagged. Unit 3 is outside
+    # the register but already flagged by an earlier step, which must be kept.
+    df = pd.DataFrame(
+        {"property_id": [1, 2, 3], "doors": [5.0, np.nan, 5.0], "max_eaves_m": [10.0, 8.5, 10.0]},
+    )
+    df["doors_doubtful"] = [False, False, True]
+    df["quality_notes"] = [[] for _ in range(len(df))]
+    issues = [{"property_ids": [1, 2], "fields": ["doors", "max_eaves_m"], "reason": "a test reason"}]
+    out = apply_known_issues(df, issues)
+    assert out["doors_doubtful"].tolist() == [True, False, True]
+    assert out["max_eaves_m_doubtful"].tolist() == [True, True, False]
+    assert out["quality_notes"].iloc[0] == ["doors 5, max_eaves_m 10: a test reason, so doubtful"]  # one note
+    assert out["quality_notes"].iloc[1] == ["max_eaves_m 8.5: a test reason, so doubtful"]
+    assert out["quality_notes"].iloc[2] == []
+
+
+def test_clean_epc():
+    out = clean_epc(pd.DataFrame({"epc_rating": ["A", False, np.nan, "G"]}))
+    assert out["epc_rating"].isna().tolist() == [False, True, True, False]
+    assert out["epc_rating"].dropna().tolist() == ["A", "G"]
+
+
+def test_known_issues_after_cleaning(portfolio, marketed):
+    block = portfolio["property_id"].between(1173, 1187)
+    mews = portfolio["industrial_estate_name"] == "Granite Mews 59"
+    for field in ["min_eaves_m", "max_eaves_m", "yard_depth_m"]:
+        flagged = portfolio[f"{field}_doubtful"]
+        assert flagged.equals(portfolio[field].notna() & (block | (mews & (field != "yard_depth_m"))))
+    assert portfolio.loc[block, "yard_depth_m_doubtful"].sum() == 11  # EDA 2.7: 11 of the 34 yard depths
+    assert portfolio["build_year_doubtful"].sum() == 5 and portfolio.loc[mews, "build_year_doubtful"].all()
+    assert portfolio.loc[block & portfolio["doors"].notna(), "doors_doubtful"].all()
+    doubtful = [c for c in marketed.columns if c.endswith("_doubtful")]
+    assert set(doubtful) == {c for c in portfolio.columns if c.endswith("_doubtful")}  # same columns in both files
+    assert not marketed[[c for c in doubtful if c != "doors_doubtful"]].any().any()  # only M4's doors, from step 6
+    assert set(portfolio["epc_rating"].dropna()) == set("ABCDE")
+    assert portfolio["epc_rating"].isna().sum() == 326  # 319 blank + 7 FALSE
 
 
 def test_load_portfolio(portfolio):

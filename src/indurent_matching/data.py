@@ -31,6 +31,11 @@ sheds almost always have yards. So there is no "has a yard" feature, which would
 a unit was recorded. Only 34 units and none of the listings have a depth, so it is kept for filtering and
 context but not used for similarity; that exclusion lives in the similarity code, not here.
 
+Step 8 (EDA 2.8, 2.9): apply the known-issues register in ``config.py``, findings tied to particular Property Ids
+that no general rule can express (the 1173-1187 block, Granite Mews 59). EPC keeps only ratings A-G. It is
+context only and never scored: the ratings don't fit build year (post-2015 buildings are mostly E), so that
+caveat belongs to the whole column, not to individual rows, and gets no per-row notes.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
@@ -45,6 +50,8 @@ import numpy as np
 import pandas as pd
 
 from indurent_matching.config import (
+    EPC_RATINGS,
+    KNOWN_ISSUES,
     MAX_DOORS_ALWAYS_PLAUSIBLE,
     MIN_PLAUSIBLE_SQFT,
     MIN_SQFT_PER_DOOR,
@@ -108,7 +115,7 @@ def _read(path: Path) -> pd.DataFrame:
     """Read a spreadsheet with every cell kept as Excel holds it, and snake_case the column names."""
     df = pd.read_excel(path, dtype=object)
     df.columns = [snake_case(c) for c in df.columns]
-    required = {"property_id", "industrial_estate_name", "unit_name", *NUMERIC}
+    required = {"property_id", "industrial_estate_name", "unit_name", "epc_rating", *NUMERIC}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"{path.name} is missing columns: {sorted(missing)}")
@@ -258,6 +265,36 @@ def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(columns="_sqft_per_door")
 
 
+def apply_known_issues(df: pd.DataFrame, issues: list[dict] = KNOWN_ISSUES) -> pd.DataFrame:
+    """Step 8 (EDA 2.8, 2.9): flag the register's fields as doubtful for its Property Ids.
+
+    Adds or extends ``<field>_doubtful`` for every field the register names (False elsewhere, so both files get
+    the same columns), and one note per finding listing the values it flags, e.g. "doors 8, max_eaves_m 12.5: in
+    a block of records ..., so doubtful". A field is flagged only where a value is recorded, so the flags count
+    values we're not trusting. Rows without a matching ``property_id`` (the listings) are untouched.
+    """
+    df = df.copy()
+    for issue in issues:
+        listed = df["property_id"].isin(issue["property_ids"])
+        flagged = pd.DataFrame({field: listed & df[field].notna() for field in issue["fields"]})
+        for field in issue["fields"]:
+            flag = f"{field}_doubtful"
+            if flag not in df:
+                df[flag] = False
+            df[flag] = df[flag] | flagged[field]
+        for idx in df.index[flagged.any(axis=1)]:
+            values = ", ".join(f"{field} {df.at[idx, field]:g}" for field in issue["fields"] if flagged.at[idx, field])
+            df.at[idx, "quality_notes"] = [*df.at[idx, "quality_notes"], f"{values}: {issue['reason']}, so doubtful"]
+    return df
+
+
+def clean_epc(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 8 (EDA 2.9, 4.2): keep only valid EPC ratings; anything else (the Excel FALSE cells) is missing."""
+    df = df.copy()
+    df["epc_rating"] = df["epc_rating"].where(df["epc_rating"].isin(EPC_RATINGS))
+    return df
+
+
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the cleaning steps shared by both files, in EDA order."""
     df = _parse_numeric(df)
@@ -269,6 +306,8 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     df = clean_build_year(df)
     df = clean_eaves(df)
     df = clean_doors(df)
+    df = apply_known_issues(df)
+    df = clean_epc(df)
     return df
 
 
