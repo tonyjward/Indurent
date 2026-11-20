@@ -206,6 +206,14 @@ def test_known_issues_after_cleaning(portfolio, marketed):
     assert portfolio["epc_rating"].isna().sum() == 326  # 319 blank + 7 FALSE
 
 
+def test_column_order(portfolio, marketed):
+    assert portfolio.columns[0] == "property_id" and marketed.columns[0] == "listing_id"
+    assert portfolio.columns[-1] == "quality_notes" and marketed.columns[-1] == "quality_notes"
+    # Same columns in the same order, apart from the id and the portfolio-only estate structure.
+    shared = [c for c in portfolio.columns if c not in {"property_id", "estate_units", "is_single_unit"}]
+    assert shared == list(marketed.columns[1:])
+
+
 def test_load_portfolio(portfolio):
     df = portfolio
     assert len(df) == 1250

@@ -6,7 +6,7 @@ similarity, retrieval over the portfolio, and an LLM to interpret requests and e
 - **How it works and why:** [`DESIGN.md`](DESIGN.md)
 - **Data-quality evidence behind every cleaning rule:** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)
 
-> Work in progress: data preparation is being built step by step; matching, the AI layer and the app follow.
+> Work in progress: data preparation is done; matching, the AI layer and the app follow.
 
 ## Setup
 
@@ -41,16 +41,22 @@ Anaconda Python.
 ```python
 from indurent_matching.data import load_marketed, load_portfolio
 
-portfolio = load_portfolio("data/Current Portfolio.xlsx")    # one row per unit, keyed by property_id
-listings = load_marketed("data/Marketed Warehouses.xlsx")    # keyed by listing_id M1-M5
+portfolio = load_portfolio("data/Current Portfolio.xlsx")  # one row per unit, keyed by property_id
+listings = load_marketed("data/Marketed Warehouses.xlsx")  # keyed by listing_id M1-M5
 ```
 
 Each row carries quality information:
 
-- `<field>_doubtful` flags: the value is kept but not used for matching (so far `size_sqft_doubtful`).
+- `<field>_doubtful` flags for size, build year, yard depth, min and max eaves, and doors: the value is kept but
+  not used for matching.
 - `location_confidence`: `high` (inside its labelled region), `medium` (on land but outside it) or `unknown`
   (no coordinates, or 1 km+ offshore). Unknown locations get no `nearest_city` / `miles_to_city`.
 - `quality_notes`: plain-English reasons, e.g. "coordinates are 27 km offshore, so location can't be used".
+- `doors_describe_unit`: False where the door count is an estate total copied onto every unit of the estate.
+
+Flags come from general rules (run on every row, including new listings) and from a known-issues register in
+`config.py`: findings tied to particular Property Ids in this file. **Review the register whenever the portfolio
+data is refreshed**; its Property Ids may no longer apply.
 
 To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipynb`.
 
@@ -60,7 +66,7 @@ To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipy
 src/indurent_matching/   the package
   data.py                load and clean both spreadsheets
   geo.py                 coastline and region checks, nearest major city
-  config.py              thresholds and the city list, each citing the EDA section behind it
+  config.py              thresholds, city list and known-issues register, each citing its EDA section
 notebooks/01_eda.ipynb   exploratory data analysis and the cleaning decisions
 tests/                   pytest suite (conftest.py loads the spreadsheets once for the real-data tests)
 scripts/                 one-off maintenance scripts (see below)

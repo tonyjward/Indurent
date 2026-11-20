@@ -74,6 +74,43 @@ NUMERIC = [
     "doors",
 ]
 
+# Final column order, in groups: identity, the raw columns (parsed and cleaned), estate structure, location
+# checks, doors interpretation, quality flags, and the notes last. Each file keeps the columns it has.
+COLUMN_ORDER = [
+    "property_id",
+    "listing_id",
+    "industrial_estate_name",
+    "unit_name",
+    "region",
+    "latitude",
+    "longitude",
+    "car_parking_spaces",
+    "size_sqft",
+    "build_year",
+    "yard_depth_m",
+    "min_eaves_m",
+    "max_eaves_m",
+    "doors",
+    "epc_rating",
+    "estate_units",
+    "is_single_unit",
+    "km_offshore",
+    "km_to_region",
+    "location_confidence",
+    "derived_region",
+    "nearest_city",
+    "miles_to_city",
+    "doors_describe_unit",
+    "doors_per_unit_estimate",
+    "size_sqft_doubtful",
+    "build_year_doubtful",
+    "yard_depth_m_doubtful",
+    "min_eaves_m_doubtful",
+    "max_eaves_m_doubtful",
+    "doors_doubtful",
+    "quality_notes",
+]
+
 _RANGE = re.compile(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)")
 
 
@@ -311,6 +348,13 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _order_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Put columns in ``COLUMN_ORDER``; any column not listed goes just before ``quality_notes``."""
+    listed = [c for c in COLUMN_ORDER if c in df and c != "quality_notes"]
+    others = [c for c in df if c not in COLUMN_ORDER]
+    return df[[*listed, *others, "quality_notes"]]
+
+
 def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
     """Add ``estate_units`` (units in the row's estate) and ``is_single_unit``.
 
@@ -330,7 +374,7 @@ def load_portfolio(path: str | Path) -> pd.DataFrame:
         raise ValueError("portfolio property_id must be present and unique")
     df["property_id"] = df["property_id"].astype(int)
     df = _clean(add_estate_structure(df))  # estate structure first: the doors step needs it
-    return df.set_index("property_id", drop=False)
+    return _order_columns(df).set_index("property_id", drop=False)
 
 
 def load_marketed(path: str | Path) -> pd.DataFrame:
@@ -340,5 +384,5 @@ def load_marketed(path: str | Path) -> pd.DataFrame:
     added: a listing's estate isn't in the portfolio, so the file can't say how many units it has.
     """
     df = _clean(_read(Path(path))).drop(columns="property_id")
-    df.insert(0, "listing_id", [f"M{n}" for n in range(1, len(df) + 1)])
-    return df.set_index("listing_id", drop=False)
+    df["listing_id"] = [f"M{n}" for n in range(1, len(df) + 1)]
+    return _order_columns(df).set_index("listing_id", drop=False)

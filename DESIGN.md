@@ -15,6 +15,8 @@ into a caveated answer. It never estimates a value, and never fills in missing d
 ```
 src/indurent_matching/
   data.py        load + clean both files, attach quality flags          (step 1: preprocess)
+  geo.py         coastline/region checks, nearest major city
+  config.py      thresholds, city list, known-issues register
   features.py    per-block feature vectors and similarity               (step 2: vectorise)
   tools.py       filter_rows, find_similar, homogeneity_scores, ...     (step 3: retrieval)
   graph.py       LangGraph StateGraph, system prompt, output schema     (steps 4-5: prompt + answer)
@@ -25,37 +27,48 @@ deploy/          systemd unit for beast
 
 The notebook explores; the package decides. The package never imports from the notebook.
 
-## 1. Preprocessing (`data.py`)
+## 1. Preprocessing (`data.py`, `geo.py`, `config.py`)
 
-`load_clean(path) -> DataFrame` is used for **both** files, so new listings get the same treatment as the
-portfolio. It returns:
+`load_portfolio(path)` and `load_marketed(path)` run the **same** cleaning steps (in EDA order), so new listings
+get the same treatment as the portfolio. Thresholds, the city list and the known-issues register live in
+`config.py`, each citing the EDA section behind it. Column names are the spreadsheet's, in snake_case
+(`Min. Eaves m` -> `min_eaves_m`); the portfolio is keyed by `property_id`, the listings by `listing_id` (M1-M5).
 
 | Kind | Columns |
 |---|---|
-| Clean values | `property_id`, `estate`, `unit`, `size_sqft`, `eaves_min_m`, `eaves_max_m`, `doors`, `build_year`, `lat`, `lon`, `epc`, `parking`, `yard_depth_m` |
-| Structure | `estate_units`, `is_single_unit` |
-| Derived | `x_km`, `y_km` (British National Grid), `nearest_city`, `miles_to_city`, `derived_region` |
-| Quality | `location_confidence` (high / medium / unknown), `doubtful_fields` (set of field names), `quality_notes` (human-readable reasons) |
+| Identity | `property_id` / `listing_id`, `industrial_estate_name`, `unit_name` |
+| Raw, parsed and cleaned | `region`, `latitude`, `longitude`, `car_parking_spaces`, `size_sqft` (renamed from `size_sqm`), `build_year`, `yard_depth_m`, `min_eaves_m`, `max_eaves_m`, `doors`, `epc_rating` |
+| Estate structure (portfolio only) | `estate_units`, `is_single_unit` |
+| Location | `km_offshore`, `km_to_region`, `location_confidence` (high / medium / unknown), `derived_region`, `nearest_city`, `miles_to_city` |
+| Doors | `doors_describe_unit` (False where the count is a copied estate total), `doors_per_unit_estimate` (display only) |
+| Quality | `<field>_doubtful` flags (size, build year, yard depth, min/max eaves, doors), `quality_notes` (plain-English reasons, passed to the LLM) |
+
+A doubtful value is kept but never scored. A note without a flag is context only (e.g. "very large").
 
 Rules come in two kinds, kept separate in the code:
 
 **General rules** (run on any row, including new listings):
 
-- placeholders (`X`, `-`, `TBC`) and zeros in eaves/doors → missing; ranges (`20-28`) → midpoint
-- `Size sqm` is read as square feet (the total matches Indurent's published 28-40m sq ft)
-- location confidence from the coastline and labelled-region checks; no distances for `unknown`
-- values constant across a multi-unit estate (doors, eaves, parking, yard depth) are estate-level, not unit facts
-- implausible doors for the building's size; implausible eaves (under 5 m, or tall eaves on a tiny unit)
+- placeholders (`X`, `-`, `TBC`) and zeros in eaves/doors -> missing; ranges (`20-28`) -> midpoint
+- `Size sqm` is read as square feet (the total matches Indurent's published 28-40m sq ft); under 500 sq ft is
+  doubtful, over 600k sq ft is noted as very large
+- location confidence from the coastline and labelled-region checks (1 km tolerance); no city distance for
+  `unknown`
+- a door count that is the same on every unit of a multi-unit estate is an estate total, not the unit's own
+- a unit's own door count is doubtful if it has more than 3 doors and fewer than 2,000 sq ft per door
+- EPC keeps A-G only; it is context only, with one column-wide caveat (ratings don't fit build year)
 
-**Known-issues register** (findings specific to this dataset, each with its reason and EDA section):
+**Known-issues register** (`KNOWN_ISSUES`: findings tied to particular Property Ids that no general rule can
+express). Fields are flagged only where a value is recorded, with one note per finding:
 
 | Property Ids | Fields | Reason |
 |---|---|---|
-| 1173-1187 | doors, eaves, yard depth | specs contradict size; order-blind scan (EDA 2.8) |
-| 126 (Opal Forge 42), 548 (Granite Summit 84) | doors | ~7x denser than a typical shed (EDA 2.6) |
-| 259-263 (Granite Mews 59) | all physical + age | 2.1-2.4 m eaves, 1939-1953, EPC A (EDA 2.9) |
+| 1173-1187 | doors, min/max eaves, yard depth | specs look attached to the wrong units: eaves-size correlation reverses inside the block (EDA 2.8) |
+| 259-263 (Granite Mews 59) | min/max eaves, build year | 2.1-2.4 m eaves, 1939-1953, EPC A (EDA 2.9) |
 
-In production this register would go back to the owners of the source data so the records get fixed.
+Opal Forge 42 and Granite Summit 84 (implausible doors, EDA 2.6) need no entry: the door-density rule catches
+them. The register must be reviewed whenever the portfolio data is refreshed; in production it would go back to
+the owners of the source data so the records get fixed.
 
 ## 2. Vectorisation and similarity (`features.py`)
 
@@ -66,8 +79,8 @@ Three blocks, matching the brief's prompt 2:
 
 | Block | Features | Similarity |
 |---|---|---|
-| Physical | log size, max eaves, doors (single-unit estates only) | robust-scaled distance over shared features |
-| Location | BNG x/y | `exp(-miles / 25)`-style decay on great-circle miles |
+| Physical | log size, max eaves, doors (where the count is the unit's own) | robust-scaled distance over shared features |
+| Location | latitude/longitude (high and medium confidence only) | `exp(-miles / 25)`-style decay on great-circle miles |
 | Age | build year | decay on the year gap (half-similar at ~15 years) |
 
 - **Missing or doubtful values are masked, not imputed**: each block compares only the features both units have
@@ -75,8 +88,8 @@ Three blocks, matching the brief's prompt 2:
 - **Coverage** is recorded per match (which features it rested on) and penalises thin matches in the ranking.
 - **Combined score**: weighted mean of the available blocks; weights are parameters (default equal).
 - **Estate cap**: at most 2 units per estate in a result list (one estate has 64 units).
-- **Not used for similarity**: EPC (unreliable, EDA 2.9), parking and yard depth (estate-level / sparse),
-  region labels (only 26% agree with coordinates). EPC and parking are shown as context.
+- **Not used for similarity**: EPC (unreliable, EDA 2.9), parking (estate-level), yard depth (34 units, no
+  listings), region labels (only 26% agree with coordinates). They are shown as context and can be filtered on.
 
 **Homogeneity score (prompt 2).** "Correlation score" is ambiguous; the interpretation used, and stated in every
 answer: per block, the listing's mean similarity to its k nearest portfolio units, expressed as a percentile of the
