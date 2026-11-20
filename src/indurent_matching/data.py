@@ -24,6 +24,13 @@ Step 6 (EDA 2.6): zero doors become missing; a door count copied across a multi-
 so it is marked as not describing the unit and given a per-unit estimate for context. A unit's own count that
 is implausibly dense for its size is flagged as doubtful.
 
+Step 7 (EDA 2.7): yard depth needs no cleaning beyond step 0's parsing (blank cells are already missing, there
+are no zero placeholders, and the ranges "20-28" and "25-33" become midpoints). We assume blank means "not recorded", not
+"no yard": depths are mostly recorded where eaves are, and most units over 100k sq ft have none although big
+sheds almost always have yards. So there is no "has a yard" feature, which would mostly measure how thoroughly
+a unit was recorded. Only 34 units and none of the listings have a depth, so it is kept for filtering and
+context but not used for similarity; that exclusion lives in the similarity code, not here.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
