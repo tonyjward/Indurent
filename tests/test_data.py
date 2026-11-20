@@ -10,7 +10,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from indurent_matching.data import add_estate_structure, load_marketed, load_portfolio, parse_number, snake_case
+from indurent_matching.data import (
+    add_estate_structure,
+    clean_size,
+    load_marketed,
+    load_portfolio,
+    parse_number,
+    snake_case,
+)
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 PORTFOLIO = DATA / "Current Portfolio.xlsx"
@@ -61,6 +68,21 @@ def test_estate_structure():
     assert out["is_single_unit"].tolist() == [False, False, False, True]
 
 
+def test_clean_size():
+    df = pd.DataFrame({"size_sqm": [262.0, 499.9, 500.0, 5_000.0, 600_000.0, 700_000.0, np.nan]})
+    df["quality_notes"] = [[] for _ in range(len(df))]
+    out = clean_size(df)
+    assert "size_sqft" in out.columns and "size_sqm" not in out.columns
+    assert out["size_sqft"].iloc[3] == 5_000.0  # values unchanged, only renamed
+    assert out["size_sqft_doubtful"].tolist() == [True, True, False, False, False, False, False]
+    assert out["quality_notes"].iloc[0] == [
+        "size 262 sq ft: below Indurent's smallest unit band (500 sq ft), so doubtful"
+    ]
+    assert out["quality_notes"].iloc[5] == ["size 700,000 sq ft: very large (over 600,000 sq ft); rare but plausible"]
+    assert out["quality_notes"].iloc[4] == []  # 600,000 exactly is not "over"
+    assert not out["size_sqft_doubtful"].iloc[5]  # very large is a note, not a flag
+
+
 @real_data
 def test_load_portfolio():
     df = load_portfolio(PORTFOLIO)
@@ -69,7 +91,10 @@ def test_load_portfolio():
     assert df["industrial_estate_name"].nunique() == 263
     estates = df.groupby("industrial_estate_name")["estate_units"].first()
     assert (estates == 1).sum() == 125  # EDA section 1
-    assert df["size_sqm"].dtype == float and df["doors"].dtype == float
+    assert df["size_sqft"].dtype == float and df["doors"].dtype == float
+    assert round(df["size_sqft"].sum() / 1e6, 1) == 30.6  # EDA 2.1: matches Indurent's 28-40m sq ft
+    assert df["size_sqft_doubtful"].sum() == 10
+    assert sum(any("very large" in n for n in notes) for notes in df["quality_notes"]) == 5
 
 
 @real_data

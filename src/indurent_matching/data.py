@@ -3,9 +3,17 @@
 Each step follows a section of ``notebooks/01_eda.ipynb``, where the evidence for every rule is shown.
 The functions here only apply the decisions; they don't re-derive them.
 
-Step 0 (this file so far): load the raw files, rename columns to snake_case, key the portfolio by its existing
-``property_id`` and give the marketed listings ids (M1-M5, since their Property Id column is empty), parse the
-numeric columns, and describe the estate structure.
+Step 0: load the raw files, rename columns to snake_case, key the portfolio by its existing ``property_id`` and
+give the marketed listings ids (M1-M5, since their Property Id column is empty), parse the numeric columns, and
+describe the estate structure.
+
+Step 1 (EDA 2.1): size is square feet; flag implausibly small units, note very large ones.
+
+Quality is recorded on each row in two ways:
+
+* ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
+* ``quality_notes`` (list of str): plain-English reasons, passed to the AI so answers can explain them.
+  A note without a flag is context only (e.g. "very large"); it doesn't remove the value from scoring.
 """
 
 import re
@@ -13,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from indurent_matching.config import MIN_PLAUSIBLE_SQFT, VERY_LARGE_SQFT
 
 # Columns parsed as numbers, under their snake_case names. size_sqm holds square feet (EDA 2.1); it is renamed
 # to size_sqft in the size step, where that decision is made. region is the dataset's own label, which only
@@ -85,6 +95,45 @@ def _parse_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _add_note(df: pd.DataFrame, mask: pd.Series, template: str) -> None:
+    """Append a note to ``quality_notes`` for every row where ``mask`` is True (in place).
+
+    ``template`` is formatted with that row's values, e.g. "size {size_sqft:,.0f} sq ft: ...".
+    """
+    for idx in df.index[mask]:
+        df.at[idx, "quality_notes"] = [*df.at[idx, "quality_notes"], template.format(**df.loc[idx])]
+
+
+def clean_size(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 1 (EDA 2.1): read size as square feet, flag implausibly small units, note very large ones.
+
+    The column is labelled sqm, but its total (30.6m) matches Indurent's published 28-40m sq ft and eaves
+    heights fit the sq ft reading, so the values are kept and the column renamed to ``size_sqft``. Thresholds are
+    in ``config.py``.
+    """
+    df = df.rename(columns={"size_sqm": "size_sqft"})
+    small = df["size_sqft"] < MIN_PLAUSIBLE_SQFT
+    df["size_sqft_doubtful"] = small
+    _add_note(
+        df,
+        small,
+        f"size {{size_sqft:,.0f}} sq ft: below Indurent's smallest unit band ({MIN_PLAUSIBLE_SQFT:,} sq ft), so doubtful",
+    )
+    _add_note(
+        df,
+        df["size_sqft"] > VERY_LARGE_SQFT,
+        f"size {{size_sqft:,.0f}} sq ft: very large (over {VERY_LARGE_SQFT:,} sq ft); rare but plausible",
+    )
+    return df
+
+
+def _clean(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply the cleaning steps shared by both files, in EDA order."""
+    df = _parse_numeric(df)
+    df["quality_notes"] = [[] for _ in range(len(df))] # starts an empty list placeholder for every row, later steps append to it using _add_note
+    return clean_size(df)
+
+
 def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
     """Add ``estate_units`` (units in the row's estate) and ``is_single_unit``.
 
@@ -99,7 +148,7 @@ def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_portfolio(path: str | Path) -> pd.DataFrame:
     """Load the portfolio file: one row per unit, keyed by the integer ``property_id``."""
-    df = _parse_numeric(_read(Path(path)))
+    df = _clean(_read(Path(path)))
     if df["property_id"].isna().any() or not df["property_id"].is_unique:
         raise ValueError("portfolio property_id must be present and unique")
     df["property_id"] = df["property_id"].astype(int)
@@ -112,6 +161,6 @@ def load_marketed(path: str | Path) -> pd.DataFrame:
     The file has an empty Property Id column, so listings get their own ids. Estate structure is not
     added: a listing's estate isn't in the portfolio, so the file can't say how many units it has.
     """
-    df = _parse_numeric(_read(Path(path))).drop(columns="property_id")
+    df = _clean(_read(Path(path))).drop(columns="property_id")
     df.insert(0, "listing_id", [f"M{n}" for n in range(1, len(df) + 1)])
     return df.set_index("listing_id", drop=False)
