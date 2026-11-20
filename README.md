@@ -45,8 +45,12 @@ portfolio = load_portfolio("data/Current Portfolio.xlsx")    # one row per unit,
 listings = load_marketed("data/Marketed Warehouses.xlsx")    # keyed by listing_id M1-M5
 ```
 
-Each row carries quality information: `<field>_doubtful` flags (value kept but not used for matching) and
-`quality_notes` (plain-English reasons).
+Each row carries quality information:
+
+- `<field>_doubtful` flags: the value is kept but not used for matching (so far `size_sqft_doubtful`).
+- `location_confidence`: `high` (inside its labelled region), `medium` (on land but outside it) or `unknown`
+  (no coordinates, or 1 km+ offshore). Unknown locations get no `nearest_city` / `miles_to_city`.
+- `quality_notes`: plain-English reasons, e.g. "coordinates are 27 km offshore, so location can't be used".
 
 To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipynb`.
 
@@ -55,9 +59,10 @@ To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipy
 ```
 src/indurent_matching/   the package
   data.py                load and clean both spreadsheets
-  config.py              thresholds, each citing the EDA section behind it
+  geo.py                 coastline and region checks, nearest major city
+  config.py              thresholds and the city list, each citing the EDA section behind it
 notebooks/01_eda.ipynb   exploratory data analysis and the cleaning decisions
-tests/                   pytest suite
+tests/                   pytest suite (conftest.py loads the spreadsheets once for the real-data tests)
 scripts/                 one-off maintenance scripts (see below)
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
 ```

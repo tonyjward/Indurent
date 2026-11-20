@@ -1,10 +1,8 @@
 """Tests for indurent_matching.data.
 
-Unit tests use small made-up frames. Tests marked ``real_data`` read the assessment files in data/
-(gitignored) and are skipped when those files aren't present.
+Unit tests use small made-up frames. Tests taking the ``portfolio`` / ``marketed`` fixtures (tests/conftest.py)
+use the assessment files in data/ and are skipped when those files aren't present.
 """
-
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -13,16 +11,9 @@ import pytest
 from indurent_matching.data import (
     add_estate_structure,
     clean_size,
-    load_marketed,
-    load_portfolio,
     parse_number,
     snake_case,
 )
-
-DATA = Path(__file__).resolve().parents[1] / "data"
-PORTFOLIO = DATA / "Current Portfolio.xlsx"
-MARKETED = DATA / "Marketed Warehouses.xlsx"
-real_data = pytest.mark.skipif(not PORTFOLIO.exists(), reason="assessment data not present")
 
 
 @pytest.mark.parametrize(
@@ -83,9 +74,8 @@ def test_clean_size():
     assert not out["size_sqft_doubtful"].iloc[5]  # very large is a note, not a flag
 
 
-@real_data
-def test_load_portfolio():
-    df = load_portfolio(PORTFOLIO)
+def test_load_portfolio(portfolio):
+    df = portfolio
     assert len(df) == 1250
     assert df.index.is_unique and df.index.name == "property_id"
     assert df["industrial_estate_name"].nunique() == 263
@@ -97,9 +87,8 @@ def test_load_portfolio():
     assert sum(any("very large" in n for n in notes) for notes in df["quality_notes"]) == 5
 
 
-@real_data
-def test_load_marketed():
-    df = load_marketed(MARKETED)
+def test_load_marketed(marketed):
+    df = marketed
     assert df.index.tolist() == ["M1", "M2", "M3", "M4", "M5"]
     assert "property_id" not in df.columns
     assert df.loc["M3", "industrial_estate_name"] == "Spitfire Park"

@@ -9,6 +9,9 @@ describe the estate structure.
 
 Step 1 (EDA 2.1): size is square feet; flag implausibly small units, note very large ones.
 
+Step 2 (EDA 2.2, section 5): location confidence from the coastline and labelled-region checks, the region the
+coordinates fall in, and the nearest major city (trusted locations only). See ``geo.py``.
+
 Quality is recorded on each row in two ways:
 
 * ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
@@ -23,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from indurent_matching.config import MIN_PLAUSIBLE_SQFT, VERY_LARGE_SQFT
+from indurent_matching.geo import assess_locations, nearest_city
 
 # Columns parsed as numbers, under their snake_case names. size_sqm holds square feet (EDA 2.1); it is renamed
 # to size_sqft in the size step, where that decision is made. region is the dataset's own label, which only
@@ -127,11 +131,41 @@ def clean_size(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def clean_location(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 2 (EDA 2.2, section 5): judge how far each row's coordinates can be trusted.
+
+    Adds ``km_offshore``, ``km_to_region``, ``location_confidence`` (high / medium / unknown), ``derived_region``,
+    ``nearest_city`` and ``miles_to_city``. Coordinates are kept as recorded; ``location_confidence`` plays the
+    role of a doubtful flag, so there's no ``latitude_doubtful``. Unknown locations get no city distance.
+    """
+    df = pd.concat([df, assess_locations(df)], axis=1)
+    df = pd.concat([df, nearest_city(df, df["location_confidence"] != "unknown")], axis=1)
+
+    no_coords = df["latitude"].isna() | df["longitude"].isna()
+    offshore = df["location_confidence"].eq("unknown") & ~no_coords
+    outside = df["location_confidence"].eq("medium") & df["km_to_region"].notna()
+    no_label = df["location_confidence"].eq("medium") & df["km_to_region"].isna()
+    _add_note(df, no_coords, "no coordinates, so location can't be used")
+    _add_note(df, offshore, "coordinates are {km_offshore:.0f} km offshore, so location can't be used")
+    _add_note(
+        df,
+        outside,
+        "location medium confidence: {km_to_region:.0f} km outside labelled region ({region}), "
+        "falls in {derived_region}",
+    )
+    _add_note(df, no_label, "no region label to check the coordinates against, so location is medium confidence")
+    return df
+
+
 def _clean(df: pd.DataFrame) -> pd.DataFrame:
     """Apply the cleaning steps shared by both files, in EDA order."""
     df = _parse_numeric(df)
-    df["quality_notes"] = [[] for _ in range(len(df))] # starts an empty list placeholder for every row, later steps append to it using _add_note
-    return clean_size(df)
+    df["quality_notes"] = [
+        [] for _ in range(len(df))
+    ]  # starts an empty list placeholder for every row, later steps append to it using _add_note
+    df = clean_size(df)
+    df = clean_location(df)
+    return df
 
 
 def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
