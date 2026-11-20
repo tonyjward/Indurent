@@ -72,29 +72,62 @@ the owners of the source data so the records get fixed.
 
 ## 2. Vectorisation and similarity (`features.py`)
 
-Structured data gets **numeric** vectors, not text embeddings: text embeddings handle magnitudes badly ("12,000"
-and "120,000" look alike) and can't apply the quality rules.
+Structured data gets **numeric** features, not text embeddings: text embeddings handle magnitudes badly
+("12,000" and "120,000" look alike) and can't apply the quality rules. The evidence for each choice below is in
+the similarity notebooks: [`02_similarity_build_year`](notebooks/02_similarity_build_year.ipynb),
+[`03_similarity_location`](notebooks/03_similarity_location.ipynb) and
+[`04_similarity_physical`](notebooks/04_similarity_physical.ipynb).
 
-Three blocks, matching the brief's prompt 2:
+Three blocks, matching the brief's prompt 2, each scored on its own feature:
 
-| Block | Features | Similarity |
+| Block | Feature | Usable values |
 |---|---|---|
-| Physical | log size, max eaves, doors (where the count is the unit's own) | robust-scaled distance over shared features |
-| Location | latitude/longitude (high and medium confidence only) | `exp(-miles / 25)`-style decay on great-circle miles |
-| Age | build year | decay on the year gap (half-similar at ~15 years) |
+| Age | build year | recorded and not doubtful |
+| Location | latitude/longitude | high and medium confidence only |
+| Physical | size (log scale) | recorded and not doubtful |
 
-- **Missing or doubtful values are masked, not imputed**: each block compares only the features both units have
-  (Gower-style similarity for mixed, incomplete data). A block with nothing to compare is "not available", not 0.
-- **Coverage** is recorded per match (which features it rested on) and penalises thin matches in the ranking.
-- **Combined score**: weighted mean of the available blocks; weights are parameters (default equal).
-- **Estate cap**: at most 2 units per estate in a result list (one estate has 64 units).
-- **Not used for similarity**: EPC (unreliable, EDA 2.9), parking (estate-level), yard depth (34 units, no
-  listings), region labels (only 26% agree with coordinates). They are shown as context and can be filtered on.
+Every score is 0-1. A block a listing can't be scored on is **"not available"**, never 0 (M2 has no coordinates
+or build year; M5 is offshore).
 
-**Homogeneity score (prompt 2).** "Correlation score" is ambiguous; the interpretation used, and stated in every
-answer: per block, the listing's mean similarity to its k nearest portfolio units, expressed as a percentile of the
-same quantity for portfolio units against their own neighbours. "Physical 82" = more typical of the portfolio than
-82% of portfolio units are of each other.
+**Not scored, shown as context:** eaves height (only M4 and M5 have it; scoring it would put them on a different
+basis from the other listings), doors (39 usable portfolio counts), volume (99% correlated with size), EPC
+(unreliable, EDA 2.9), parking (estate-level), yard depth (34 units, no listings), region labels (only 26% agree
+with coordinates). All can be filtered on.
+
+### Homogeneity scores (prompt 2): how typical is the listing of the portfolio?
+
+"Correlation score" is ambiguous; the interpretation used, and stated in every answer, is *how typical the
+listing is of the portfolio on each block*. Each score is scaled so the most typical value in the portfolio
+scores 1:
+
+| Block | Score | Context reported alongside |
+|---|---|---|
+| Age | Units in the listing's 5-year build-year band (1955-59, ..., 2020-22) / units in the busiest band | |
+| Location | Best portfolio estate's mean miles to its 5 nearest other estates / the listing's mean miles to its 5 nearest estates, leaving out the estate it sits on | The estate it sits on ("sits on Velvet Park 60, which you own"); the nearest other estate; the percentile among portfolio estates |
+| Physical | Portfolio units within a doubling-wide window centred on the listing's size (size / 1.41 to size x 1.41) / the busiest such window | Eaves height against similar-sized units ("tall for its size") |
+
+Why these forms: build years are flat from 1970 to 2021, so fixed bands work (the jump at 1970 is in the data);
+sizes slope steadily, so a moving window avoids jumps at band edges. Every listing with coordinates sits on an
+existing Indurent estate, so location uses estates, not units, as the neighbours: nearest units would all be
+from the listing's own estate at about 0 miles.
+
+### Pairwise similarity (prompt 1): how similar is the listing to one portfolio unit?
+
+Each block uses the same form, similarity = 0.5^(gap / h), so it is 1 for an identical value and halves with
+every step of h:
+
+| Block | Gap | Halves every |
+|---|---|---|
+| Age | years between build years | 10 years |
+| Location | miles between the two (great-circle) | 10 miles |
+| Physical | doublings between the sizes, \|log2(size ratio)\| | 1 doubling (twice or half the size) |
+
+- **Combined score**: the mean of the blocks, equally weighted by default; weights are parameters.
+- **Missing blocks**: a block the *listing* lacks is dropped for that listing (M2 is matched on size only, and
+  the answer says so). A block a *portfolio unit* lacks scores 0, so a unit with less known about it can't
+  outrank one that matches on everything; the answer shows it as "unknown".
+- **Estate cap**: at most 2 units per estate in a result list. Without it, a listing's top 10 would be mostly
+  units on the estate it sits on, which all score about 1 on location.
 
 ## 3. Tools (`tools.py`)
 
@@ -140,7 +173,7 @@ START -> agent <-> tools -> validate -> respond -> END
 
 | Layer | What | Cost |
 |---|---|---|
-| Tools | filter semantics (unknowns dropped/kept), estate cap, masking, known-issues flags, a listing with no coordinates | free, deterministic |
+| Tools | filter semantics (unknowns dropped/kept), estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
 | Graph | scripted chat model replays chosen tool calls: state flows filter -> similarity, validation rejects an invented Property Id, retry stops after one | free, deterministic |
 | Tool-call evals | real model, `@pytest.mark.llm` (skipped by default): each case = prompt + expected calls and arguments | paid, run on request |
 
