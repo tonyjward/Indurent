@@ -276,3 +276,98 @@ def size_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
     # Compare as a ratio: the gap is the log of the size ratio, and one half-life is the log of SIZE_HALF_LIFE_RATIO.
     log_ratio = np.log(usable(portfolio, "size_sqft") / size)
     return halving(log_ratio, np.log(SIZE_HALF_LIFE_RATIO))
+
+
+# --- Combining the blocks (notebook 05) --------------------------------------------------------------------------
+
+BLOCKS = ("age", "location", "physical")
+
+
+def _listing_blocks(listing: pd.Series) -> list[str]:
+    """The blocks the listing can be compared on: those where it has a usable value."""
+    has = {
+        "age": pd.notna(usable(listing, "build_year")),
+        "location": bool(has_usable_location(listing)),
+        "physical": pd.notna(usable(listing, "size_sqft")),
+    }
+    return [block for block in BLOCKS if has[block]]
+
+
+def most_similar(
+    listing: pd.Series,
+    portfolio: pd.DataFrame,
+    k: int = 10,
+    weights: dict[str, float] | None = None,
+    max_per_estate: int | None = None,
+) -> pd.DataFrame:
+    """The ``k`` portfolio units most similar to the listing, best first (prompt 1).
+
+    Each unit is scored on age, location and physical (size) with the pairwise functions above, and the overall
+    score is the weighted average of those blocks (equal weights unless ``weights`` says otherwise, e.g.
+    ``{"location": 2}``). Two rules handle missing values:
+
+    * a block the **listing** has no usable value for is dropped, so M2 (no build year or location) is matched on
+      size alone;
+    * a block a **unit** has no usable value for counts as 0, so a unit we know less about can't outrank one that
+      matches on everything. Its block column is left blank, so an answer can say "unknown" rather than
+      "dissimilar".
+
+    Ties are broken by Property Id, so results don't change between runs. There's no cap on units per estate unless
+    ``max_per_estate`` is given (units on the estate a listing sits on are genuinely among the most similar). To
+    rank only part of the portfolio (prompt 3), pass the filtered rows as ``portfolio``.
+
+    Returns one row per match, on the portfolio's index: the unit's estate and name, ``overall``, the ``age``,
+    ``location`` and ``physical`` scores, and the facts behind them (``build_year``, ``size_sqft``,
+    ``miles_from_listing``).
+    """
+    used = _listing_blocks(listing)
+    if not used:
+        raise ValueError("the listing has no usable build year, location or size to compare")
+    weights = {block: 1.0 for block in BLOCKS} | (weights or {})
+    if unknown := set(weights) - set(BLOCKS):
+        raise ValueError(f"unknown blocks in weights: {sorted(unknown)}; expected {list(BLOCKS)}")
+
+    scores = pd.DataFrame(
+        {
+            "age": age_similarity(listing, portfolio),
+            "location": location_similarity(listing, portfolio),
+            "physical": size_similarity(listing, portfolio),
+        }
+    )
+    block_weights = pd.Series({block: weights[block] for block in used})
+    overall = scores[used].fillna(0).mul(block_weights).sum(axis=1) / block_weights.sum()
+
+    miles = _miles_from(listing, portfolio).where(has_usable_location(portfolio)) if "location" in used else np.nan
+    result = pd.DataFrame(
+        {
+            "industrial_estate_name": portfolio["industrial_estate_name"],
+            "unit_name": portfolio["unit_name"],
+            "overall": overall,
+            **{block: scores[block] if block in used else np.nan for block in BLOCKS},
+            "build_year": portfolio["build_year"],
+            "size_sqft": portfolio["size_sqft"],
+            "miles_from_listing": miles,
+        },
+        index=portfolio.index,
+    )
+    # Sort by Property Id first, then stably by score, so equal scores stay in Property Id order.
+    result = result.sort_index().sort_values("overall", ascending=False, kind="stable")
+    if max_per_estate is not None:
+        result = result[result.groupby("industrial_estate_name").cumcount() < max_per_estate]
+    return result.head(k)
+
+
+def homogeneity_scores(listing: pd.Series, portfolio: pd.DataFrame) -> dict:
+    """Everything prompt 2 needs for one listing: the three homogeneity scores and their context.
+
+    Returns ``age``, ``location`` and ``physical`` (each 0-1, or NaN when not available), plus ``location_context``
+    (the estate the listing sits on, the nearest other estate, the percentile) and ``size_context`` (eaves against
+    similar-sized units). The context is for explaining the scores; none of it is scored.
+    """
+    return {
+        "age": age_homogeneity(listing, portfolio),
+        "location": location_homogeneity(listing, portfolio),
+        "physical": size_homogeneity(listing, portfolio),
+        "location_context": location_context(listing, portfolio),
+        "size_context": size_context(listing, portfolio),
+    }

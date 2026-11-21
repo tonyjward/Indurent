@@ -13,9 +13,11 @@ from indurent_matching.similarity import (
     age_similarity,
     get_year_band,
     halving,
+    homogeneity_scores,
     location_context,
     location_homogeneity,
     location_similarity,
+    most_similar,
     sits_on_estate,
     size_context,
     size_homogeneity,
@@ -233,3 +235,85 @@ def test_size_scores_match_notebook(portfolio, marketed):
     )
     assert size_context(marketed.loc["M1"], portfolio)["eaves_m"] is None  # M1 has no eaves
     assert size_similarity(marketed.loc["M3"], portfolio).isna().sum() == 10  # the 10 doubtful sizes
+
+
+# --- Combining the blocks ----------------------------------------------------------------------------------------
+
+
+def _unit(estate, lat, build_year, size, confidence="high"):
+    return {
+        "industrial_estate_name": estate,
+        "unit_name": "Unit",
+        "latitude": lat,
+        "longitude": 0.0,
+        "location_confidence": confidence,
+        "build_year": build_year,
+        "build_year_doubtful": False,
+        "size_sqft": size,
+        "size_sqft_doubtful": False,
+    }
+
+
+# The listing: built 2000, 4,000 sq ft, at latitude 52. Expected overall scores (equal weights) in the comments.
+CANDIDATES = pd.DataFrame(
+    [
+        _unit("E1", 52.0, 2000, 4_000),  # 0: identical on all three -> 1.0
+        _unit("E1", 52.0, 2010, 4_000),  # 1: 10 years newer -> age 0.5 -> (0.5 + 1 + 1) / 3 = 0.83
+        _unit("E2", 52.0, 2010, 8_000),  # 2: 10 years newer, twice the size -> (0.5 + 1 + 0.5) / 3 = 0.67
+        _unit("E3", 52.0, 2000, 4_000, confidence="unknown"),  # 3: location unknown, counts 0 -> 0.67 (tie with 2)
+        _unit("E1", 52.0, np.nan, 2_000),  # 4: build year unknown (0), half the size -> (0 + 1 + 0.5) / 3 = 0.5
+    ]
+)
+TARGET = pd.Series(_unit("listing", 52.0, 2000, 4_000))
+
+
+def test_most_similar_ranking_and_missing_blocks():
+    out = most_similar(TARGET, CANDIDATES)
+    assert out.index.tolist() == [0, 1, 2, 3, 4]  # 2 and 3 tie at 0.67: Property Id order
+    assert out["overall"].round(2).tolist() == [1.0, 0.83, 0.67, 0.67, 0.5]
+    assert np.isnan(out.loc[3, "location"]) and np.isnan(out.loc[4, "age"])  # shown blank, counted as 0
+    assert out.loc[0, "miles_from_listing"] == 0 and np.isnan(out.loc[3, "miles_from_listing"])
+
+
+def test_most_similar_drops_blocks_the_listing_lacks():
+    no_location = TARGET.copy()
+    no_location["location_confidence"] = "unknown"
+    out = most_similar(no_location, CANDIDATES)
+    assert out["location"].isna().all() and out["miles_from_listing"].isna().all()
+    assert out.loc[3, "overall"] == pytest.approx(1.0)  # (age 1 + size 1) / 2: location dropped, not 0
+    nothing = no_location.copy()
+    nothing["build_year"], nothing["size_sqft"] = np.nan, np.nan
+    with pytest.raises(ValueError, match="no usable"):
+        most_similar(nothing, CANDIDATES)
+
+
+def test_most_similar_weights_cap_and_k():
+    out = most_similar(TARGET, CANDIDATES, weights={"age": 0})  # ignore age: 0 and 1 tie at 1, then 2 and 4 at 0.75
+    assert out.index.tolist() == [0, 1, 2, 4, 3]
+    assert most_similar(TARGET, CANDIDATES, max_per_estate=1).index.tolist() == [0, 2, 3]  # one unit per estate
+    assert len(most_similar(TARGET, CANDIDATES, k=2)) == 2
+    with pytest.raises(ValueError, match="unknown blocks"):
+        most_similar(TARGET, CANDIDATES, weights={"eaves": 1})
+
+
+def test_most_similar_on_real_data(portfolio, marketed):
+    m3 = most_similar(marketed.loc["M3"], portfolio)
+    assert (m3["industrial_estate_name"] == "Velvet Park 60").all()  # no cap: all on the estate M3 sits on
+    capped = most_similar(marketed.loc["M3"], portfolio, max_per_estate=2)
+    assert len(capped) == 10 and capped["industrial_estate_name"].value_counts().max() == 2
+    m2 = most_similar(marketed.loc["M2"], portfolio)
+    assert m2[["age", "location"]].isna().all().all()  # M2 has no build year or location: size only
+    assert (m2["overall"] == m2["physical"]).all()
+
+
+def test_homogeneity_scores(portfolio, marketed):
+    m4 = homogeneity_scores(marketed.loc["M4"], portfolio)
+    assert {k: round(m4[k], 2) for k in ["age", "location", "physical"]} == {
+        "age": 0.86,
+        "location": 0.73,
+        "physical": 0.17,
+    }
+    assert m4["location_context"]["sits_on_estate"] == "Sable Mill 91"
+    assert m4["size_context"]["eaves_m"] == 7.0
+    m2 = homogeneity_scores(marketed.loc["M2"], portfolio)
+    assert np.isnan(m2["age"]) and np.isnan(m2["location"]) and round(m2["physical"], 2) == 0.38
