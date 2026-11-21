@@ -64,7 +64,7 @@ express). Fields are flagged only where a value is recorded, with one note per f
 | Property Ids | Fields | Reason |
 |---|---|---|
 | 1173-1187 | doors, min/max eaves, yard depth | specs look attached to the wrong units: eaves-size correlation reverses inside the block (EDA 2.8) |
-| 259-263 (Granite Mews 59) | min/max eaves, build year | 2.1-2.4 m eaves, 1939-1953, EPC A (EDA 2.9) |
+| 259-263 (Granite Mews 59) | min/max eaves | 2.1-2.4 m eaves, house height (EDA 2.9). Its 1939-1953 build years are plausible and not flagged |
 
 Opal Forge 42 and Granite Summit 84 (implausible doors, EDA 2.6) need no entry: the door-density rule catches
 them. The register must be reviewed whenever the portfolio data is refreshed; in production it would go back to

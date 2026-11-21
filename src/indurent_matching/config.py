@@ -60,10 +60,12 @@ KNOWN_ISSUES = [
         "reason": "in a block of records (Property Ids 1173-1187) whose specs look attached to the wrong units",
     },
     {
-        # Granite Mews 59: 2.1-2.4 m eaves on every unit, build years 1939-1953, EPC A on three of them.
+        # Granite Mews 59: 2.1-2.4 m eaves on every unit, a garage's ceiling height (the next lowest max eaves in the
+        # portfolio is 5.2 m). Its build years (1939-1953) are not flagged: a 1940s industrial building is plausible,
+        # and the EPC A ratings that seemed to contradict them can't be relied on (EPC is unreliable throughout).
         "property_ids": range(259, 264),
-        "fields": ["min_eaves_m", "max_eaves_m", "build_year"],
-        "reason": "Granite Mews 59's record doesn't hang together (house-height eaves, 1940s build, EPC A)",
+        "fields": ["min_eaves_m", "max_eaves_m"],
+        "reason": "Granite Mews 59's eaves (2.1-2.4 m) are house height, not warehouse height",
     },
 ]
 
@@ -77,3 +79,14 @@ EPC_RATINGS = ["A", "B", "C", "D", "E", "F", "G"]
 AGE_BAND_YEARS = 5
 # Pairwise: similarity halves for every this many years between build years (roughly one era of building spec).
 AGE_HALF_LIFE_YEARS = 10
+
+# --- Similarity: location (notebook 03_similarity_location) -------------------------------------------------------
+# Homogeneity: mean miles to this many nearest other estates; the best-placed portfolio estate scores 1. A single
+# nearest estate can mislead (M1: one estate 4.4 miles away, then 30+ miles to the rest).
+LOCATION_NEIGHBOUR_ESTATES = 5
+# A listing "sits on" an estate if its nearest usable portfolio unit is within this distance (about 400 m). The
+# listings are 9-71 m from their estate's units, and no portfolio unit is more than 156 m from its estate's centre
+# (EDA 2.2).
+SITS_ON_ESTATE_MILES = 0.25
+# Pairwise: similarity halves for every this many miles apart (roughly a local industrial market).
+LOCATION_HALF_LIFE_MILES = 10

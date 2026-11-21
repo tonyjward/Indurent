@@ -197,7 +197,7 @@ def test_known_issues_after_cleaning(portfolio, marketed):
         flagged = portfolio[f"{field}_doubtful"]
         assert flagged.equals(portfolio[field].notna() & (block | (mews & (field != "yard_depth_m"))))
     assert portfolio.loc[block, "yard_depth_m_doubtful"].sum() == 11  # EDA 2.7: 11 of the 34 yard depths
-    assert portfolio["build_year_doubtful"].sum() == 5 and portfolio.loc[mews, "build_year_doubtful"].all()
+    assert not portfolio["build_year_doubtful"].any()  # Granite Mews 59's build years are plausible: not flagged
     assert portfolio.loc[block & portfolio["doors"].notna(), "doors_doubtful"].all()
     doubtful = [c for c in marketed.columns if c.endswith("_doubtful")]
     assert set(doubtful) == {c for c in portfolio.columns if c.endswith("_doubtful")}  # same columns in both files

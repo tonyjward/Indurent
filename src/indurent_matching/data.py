@@ -230,8 +230,12 @@ def clean_build_year(df: pd.DataFrame) -> pd.DataFrame:
 
     Units in the same estate differ by about 30 years (median), so filling a blank from the estate would be a
     guess. A unit without a build year simply has no age comparison.
+
+    Adds ``build_year_doubtful`` (False here). No general rule flags build years, but every scored field has a
+    flag, so the similarity code can rely on it; the known-issues register (step 8) can set it.
     """
     df = df.copy()
+    df["build_year_doubtful"] = False
     _add_note(df, df["build_year"].isna(), "no build year, so age can't be compared")
     return df
 
