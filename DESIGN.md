@@ -104,7 +104,7 @@ scores 1:
 |---|---|---|
 | Age | Units in the listing's 5-year build-year band (1955-59, ..., 2020-22) / units in the most frequent band | |
 | Location | Best portfolio estate's mean miles to its 5 nearest other estates / the listing's mean miles to its 5 nearest estates, leaving out the estate it sits on | The estate it sits on ("sits on Velvet Park 60, which you own"); the nearest other estate; the percentile among portfolio estates |
-| Physical | Portfolio units within a doubling-wide window centred on the listing's size (size / 1.41 to size x 1.41) / the window with the most units | Eaves height against similar-sized units ("tall for its size") |
+| Physical | Portfolio units of a similar size to the listing (size / 1.41 to size x 1.41: the largest twice the smallest) / the most any portfolio unit has of a similar size | Eaves height against similar-sized units ("tall for its size") |
 
 Why these forms: build years are flat from 1970 to 2021, so fixed bands work (the jump at 1970 is in the data);
 sizes slope steadily, so a moving window avoids jumps at band edges. Every listing with coordinates sits on an
@@ -120,7 +120,11 @@ every step of h:
 |---|---|---|
 | Age | years between build years | 10 years |
 | Location | miles between the two (great-circle) | 10 miles |
-| Physical | doublings between the sizes, \|log2(size ratio)\| | 1 doubling (twice or half the size) |
+| Physical | the ratio between the sizes (on a log scale, so half and double count the same) | time one size is twice the other |
+
+Size uses a ratio where age and location use a fixed gap because what matters for size is the *relative*
+difference: 1,000 vs 2,000 sq ft is a different class of unit, while 100,000 vs 101,000 sq ft is effectively the
+same. Ten miles, or ten years, mean much the same wherever they fall.
 
 - **Combined score**: the mean of the blocks, equally weighted by default; weights are parameters.
 - **Missing blocks**: a block the *listing* lacks is dropped for that listing (M2 is matched on size only, and

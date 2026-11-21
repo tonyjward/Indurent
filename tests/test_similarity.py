@@ -17,6 +17,9 @@ from indurent_matching.similarity import (
     location_homogeneity,
     location_similarity,
     sits_on_estate,
+    size_context,
+    size_homogeneity,
+    size_similarity,
     usable,
 )
 
@@ -162,3 +165,71 @@ def test_location_scores_match_notebook(portfolio, marketed):
     }
     m1 = location_context(marketed.loc["M1"], portfolio)
     assert round(m1["nearest_other_estate_miles"], 1) == 4.4 and round(m1["better_placed_than_pct"]) == 7
+
+
+# --- Physical (size) ---------------------------------------------------------------------------------------------
+
+
+def _sized(sizes, doubtful=None, min_eaves=None, max_eaves=None):
+    n = len(sizes)
+    return pd.DataFrame(
+        {
+            "size_sqft": sizes,
+            "size_sqft_doubtful": doubtful if doubtful is not None else [False] * n,
+            "min_eaves_m": min_eaves if min_eaves is not None else [np.nan] * n,
+            "max_eaves_m": max_eaves if max_eaves is not None else [np.nan] * n,
+            "min_eaves_m_doubtful": [False] * n,
+            "max_eaves_m_doubtful": [False] * n,
+        }
+    )
+
+
+def _sized_listing(size, min_eaves=np.nan, max_eaves=np.nan):
+    return _sized([size], min_eaves=[min_eaves], max_eaves=[max_eaves]).iloc[0]
+
+
+# Five units around 4,000 sq ft, one at 40,000, and a doubtful 300 sq ft unit (left out).
+SIZES = _sized([3_500, 3_800, 4_000, 4_200, 4_500, 40_000, 300], doubtful=[False] * 6 + [True])
+
+
+def test_size_homogeneity():
+    assert size_homogeneity(_sized_listing(4_000), SIZES) == pytest.approx(1.0)  # in the fullest window
+    assert size_homogeneity(_sized_listing(40_000), SIZES) == pytest.approx(1 / 5)  # alone in its window
+    assert size_homogeneity(_sized_listing(300), SIZES) == 0  # only the doubtful unit is near it, and it isn't counted
+    assert np.isnan(size_homogeneity(_sized_listing(np.nan), SIZES))
+
+
+def test_size_similarity():
+    units = _sized([2_000, 4_000, 8_000, 1_000, 500], doubtful=[False] * 4 + [True])
+    out = size_similarity(_sized_listing(2_000), units)
+    assert out.iloc[:4].tolist() == pytest.approx([1.0, 0.5, 0.25, 0.5])  # same, 2x, 4x, half
+    assert np.isnan(out.iloc[4])  # doubtful size: not available
+    assert size_similarity(_sized_listing(np.nan), units).isna().all()
+
+
+def test_size_context():
+    # Three similar-sized units with eaves (one with max only) and one far bigger, which isn't a peer.
+    units = _sized(
+        [3_500, 4_000, 4_500, 40_000],
+        min_eaves=[5.0, 6.0, np.nan, 12.0],
+        max_eaves=[6.0, 7.0, 8.0, 14.0],
+    )
+    ctx = size_context(_sized_listing(4_000, min_eaves=9.0, max_eaves=10.0), units)
+    assert ctx["eaves_m"] == 9.5  # average of min and max
+    assert ctx["similar_size_units_with_eaves"] == 3
+    assert ctx["their_median_eaves_m"] == 6.5  # 5.5, 6.5 and 8.0 (max only)
+    assert ctx["eaves_higher_than_pct"] == 100  # tall for its size
+    assert all(v is None for v in size_context(_sized_listing(4_000), units).values())  # no eaves: no context
+
+
+def test_size_scores_match_notebook(portfolio, marketed):
+    scores = {i: round(size_homogeneity(row, portfolio), 2) for i, row in marketed.iterrows()}
+    assert scores == {"M1": 0.41, "M2": 0.38, "M3": 0.87, "M4": 0.17, "M5": 0.41}
+    m4 = size_context(marketed.loc["M4"], portfolio)
+    assert (
+        m4["eaves_m"] == 7.0
+        and m4["similar_size_units_with_eaves"] == 6
+        and round(m4["their_median_eaves_m"], 1) == 4.5
+    )
+    assert size_context(marketed.loc["M1"], portfolio)["eaves_m"] is None  # M1 has no eaves
+    assert size_similarity(marketed.loc["M3"], portfolio).isna().sum() == 10  # the 10 doubtful sizes

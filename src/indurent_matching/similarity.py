@@ -23,6 +23,8 @@ from indurent_matching.config import (
     LOCATION_HALF_LIFE_MILES,
     LOCATION_NEIGHBOUR_ESTATES,
     SITS_ON_ESTATE_MILES,
+    SIZE_HALF_LIFE_RATIO,
+    SIZE_WINDOW_RATIO,
 )
 from indurent_matching.geo import haversine_miles
 
@@ -190,3 +192,87 @@ def location_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Serie
         return pd.Series(np.nan, index=portfolio.index)
     miles = _miles_from(listing, portfolio).where(has_usable_location(portfolio))
     return halving(miles, LOCATION_HALF_LIFE_MILES)
+
+
+# --- Physical: size (notebook 04) --------------------------------------------------------------------------------
+
+
+def _units_in_window(centres: np.ndarray, sorted_sizes: np.ndarray) -> np.ndarray:
+    """For each centre size, how many of ``sorted_sizes`` fall in its similar-size range (see ``SIZE_WINDOW_RATIO``)."""
+    half_width = SIZE_WINDOW_RATIO**0.5  # 1.41: the range runs from centre / 1.41 to centre x 1.41
+    upper = np.searchsorted(sorted_sizes, centres * half_width)
+    lower = np.searchsorted(sorted_sizes, centres / half_width)
+    return upper - lower
+
+
+def size_homogeneity(listing: pd.Series, portfolio: pd.DataFrame) -> float:
+    """How typical the listing's size is of the portfolio, from 0 to 1 (prompt 2).
+
+    Counts the portfolio units of a similar size to the listing: from its size / 1.41 to its size x 1.41, a range in
+    which the largest size is twice the smallest (``SIZE_WINDOW_RATIO``). Divides that by the most units any
+    portfolio unit has in the same kind of range around its own size, so a listing at the portfolio's most common
+    size scores 1. For example, if 260 units are of a similar size to a listing and the most any unit has is 298, it
+    scores 260 / 298 = 0.87. Capped at 1.
+
+    Doubtful portfolio sizes aren't counted. Returns NaN ("not available") if the listing has no usable size.
+    """
+    size = usable(listing, "size_sqft")
+    if pd.isna(size):
+        return np.nan
+    sizes = np.sort(usable(portfolio, "size_sqft").dropna().to_numpy())
+    fullest = _units_in_window(sizes, sizes).max()
+    return min(1.0, _units_in_window(np.array([size]), sizes)[0] / fullest)
+
+
+def eaves_height(df: pd.DataFrame | pd.Series) -> pd.Series | float:
+    """Eaves height: the average of min and max eaves where both are usable, otherwise whichever one is.
+
+    Doubtful values are left out. Works on the whole portfolio (a column) or on one listing (a single value).
+    """
+    low, high = usable(df, "min_eaves_m"), usable(df, "max_eaves_m")
+    if isinstance(df, pd.DataFrame):
+        return pd.concat([low, high], axis=1).mean(axis=1)
+    return pd.Series([low, high], dtype=float).mean()
+
+
+def size_context(listing: pd.Series, portfolio: pd.DataFrame) -> dict:
+    """Eaves height for an answer, compared with similar-sized portfolio units; not scored.
+
+    * ``eaves_m``: the listing's eaves height.
+    * ``similar_size_units_with_eaves``: portfolio units of a similar size (as in ``size_homogeneity``) that have an
+      eaves height.
+    * ``their_median_eaves_m``: the median eaves height of those units.
+    * ``eaves_higher_than_pct``: the share of those units with lower eaves than the listing (high means tall for
+      its size).
+
+    All values are None if the listing has no usable eaves or size (M1, M2 and M3 have no eaves).
+    """
+    keys = ["eaves_m", "similar_size_units_with_eaves", "their_median_eaves_m", "eaves_higher_than_pct"]
+    eaves, size = eaves_height(listing), usable(listing, "size_sqft")
+    if pd.isna(eaves) or pd.isna(size):
+        return dict.fromkeys(keys)
+    half_width = SIZE_WINDOW_RATIO**0.5
+    unit_size = usable(portfolio, "size_sqft")
+    peers = eaves_height(portfolio)[(unit_size >= size / half_width) & (unit_size < size * half_width)].dropna()
+    return {
+        "eaves_m": eaves,
+        "similar_size_units_with_eaves": len(peers),
+        "their_median_eaves_m": peers.median() if len(peers) else None,
+        "eaves_higher_than_pct": (peers < eaves).mean() * 100 if len(peers) else None,
+    }
+
+
+def size_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
+    """How similar the listing's size is to each portfolio unit's, from 0 to 1 (prompt 1).
+
+    The same size scores 1, and the score halves each time one size is ``SIZE_HALF_LIFE_RATIO`` times the other:
+    with 2, a unit twice or half the listing's size scores 0.5, and one four times or a quarter of it 0.25. Sizes
+    are compared as a ratio, so 2,000 vs 4,000 sq ft counts the same as 20,000 vs 40,000.
+
+    Returns one score per portfolio unit, on the portfolio's index. A unit without a usable size (missing or doubtful)
+    gets NaN ("not available"), and so does every unit if the listing has no usable size.
+    """
+    size = usable(listing, "size_sqft")
+    # Compare as a ratio: the gap is the log of the size ratio, and one half-life is the log of SIZE_HALF_LIFE_RATIO.
+    log_ratio = np.log(usable(portfolio, "size_sqft") / size)
+    return halving(log_ratio, np.log(SIZE_HALF_LIFE_RATIO))

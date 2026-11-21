@@ -90,3 +90,17 @@ LOCATION_NEIGHBOUR_ESTATES = 5
 SITS_ON_ESTATE_MILES = 0.25
 # Pairwise: similarity halves for every this many miles apart (roughly a local industrial market).
 LOCATION_HALF_LIFE_MILES = 10
+
+# --- Similarity: physical, i.e. size (notebook 04_similarity_physical) --------------------------------------------
+# Physical means size only: the one physical field every listing has. Eaves, doors and volume are context.
+# Homogeneity: count the portfolio units of a similar size to the listing, and divide by the most units any
+# portfolio unit has of a similar size to it. "Similar size" is a range around the listing's size in which the
+# largest size is this many times the smallest: with 2, a 4,000 sq ft listing counts units from about 2,830 to
+# 5,660 sq ft (4,000 / 1.41 to 4,000 x 1.41). The range moves with the listing, which avoids the jumps that fixed
+# size bands made at their edges.
+SIZE_WINDOW_RATIO = 2
+# Pairwise: similarity halves each time one size is this many times the other. With 2, a unit twice or half the
+# listing's size scores 0.5, and one four times or a quarter of it 0.25. A ratio rather than a fixed sq ft gap
+# (unlike years and miles) because size differences are relative: 1,000 vs 2,000 sq ft is a different class of
+# unit, while 100,000 vs 101,000 sq ft is effectively the same.
+SIZE_HALF_LIFE_RATIO = 2
