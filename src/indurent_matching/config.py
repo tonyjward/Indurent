@@ -70,3 +70,10 @@ KNOWN_ISSUES = [
 # --- EPC (EDA 2.9, 4.2) -----------------------------------------------------------------------------------------
 # Valid ratings; anything else (the 7 Excel FALSE cells) becomes missing.
 EPC_RATINGS = ["A", "B", "C", "D", "E", "F", "G"]
+
+# --- Similarity: age (notebook 02_similarity_build_year) ---------------------------------------------------------
+# Homogeneity: units in the listing's build-year band / units in the most frequent band. Build years are flat from 1970 to
+# 2021, so fixed bands work; 5 years averages out year-to-year noise and stops the 2022 spike setting the scale.
+AGE_BAND_YEARS = 5
+# Pairwise: similarity halves for every this many years between build years (roughly one era of building spec).
+AGE_HALF_LIFE_YEARS = 10

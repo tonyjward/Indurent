@@ -17,7 +17,7 @@ src/indurent_matching/
   data.py        load + clean both files, attach quality flags          (step 1: preprocess)
   geo.py         coastline/region checks, nearest major city
   config.py      thresholds, city list, known-issues register
-  features.py    per-block feature vectors and similarity               (step 2: vectorise)
+  similarity.py  homogeneity scores and pairwise similarity per block   (step 2: vectorise)
   tools.py       filter_rows, find_similar, homogeneity_scores, ...     (step 3: retrieval)
   graph.py       LangGraph StateGraph, system prompt, output schema     (steps 4-5: prompt + answer)
 app/app.py       Streamlit front end over the same modules
@@ -70,7 +70,7 @@ Opal Forge 42 and Granite Summit 84 (implausible doors, EDA 2.6) need no entry: 
 them. The register must be reviewed whenever the portfolio data is refreshed; in production it would go back to
 the owners of the source data so the records get fixed.
 
-## 2. Vectorisation and similarity (`features.py`)
+## 2. Vectorisation and similarity (`similarity.py`)
 
 Structured data gets **numeric** features, not text embeddings: text embeddings handle magnitudes badly
 ("12,000" and "120,000" look alike) and can't apply the quality rules. The evidence for each choice below is in
@@ -102,9 +102,9 @@ scores 1:
 
 | Block | Score | Context reported alongside |
 |---|---|---|
-| Age | Units in the listing's 5-year build-year band (1955-59, ..., 2020-22) / units in the busiest band | |
+| Age | Units in the listing's 5-year build-year band (1955-59, ..., 2020-22) / units in the most frequent band | |
 | Location | Best portfolio estate's mean miles to its 5 nearest other estates / the listing's mean miles to its 5 nearest estates, leaving out the estate it sits on | The estate it sits on ("sits on Velvet Park 60, which you own"); the nearest other estate; the percentile among portfolio estates |
-| Physical | Portfolio units within a doubling-wide window centred on the listing's size (size / 1.41 to size x 1.41) / the busiest such window | Eaves height against similar-sized units ("tall for its size") |
+| Physical | Portfolio units within a doubling-wide window centred on the listing's size (size / 1.41 to size x 1.41) / the window with the most units | Eaves height against similar-sized units ("tall for its size") |
 
 Why these forms: build years are flat from 1970 to 2021, so fixed bands work (the jump at 1970 is in the data);
 sizes slope steadily, so a moving window avoids jumps at band edges. Every listing with coordinates sits on an
@@ -126,8 +126,9 @@ every step of h:
 - **Missing blocks**: a block the *listing* lacks is dropped for that listing (M2 is matched on size only, and
   the answer says so). A block a *portfolio unit* lacks scores 0, so a unit with less known about it can't
   outrank one that matches on everything; the answer shows it as "unknown".
-- **Estate cap**: at most 2 units per estate in a result list. Without it, a listing's top 10 would be mostly
-  units on the estate it sits on, which all score about 1 on location.
+- **No estate cap by default**: the answer is the literal top 10. Units on the estate a listing sits on genuinely
+  are among the most similar, so a top 10 can be concentrated (M3's are all on Velvet Park 60, its own estate);
+  the answer says so. An optional `max_per_estate` limits units per estate when the user asks for a spread.
 
 ## 3. Tools (`tools.py`)
 
@@ -139,7 +140,7 @@ summaries, so the model never receives the full table.
 | `list_listings` | What can be compared | none |
 | `get_listing` | Resolve "the marketed property" to one listing, with its own quality notes | `name` |
 | `filter_rows` | Narrow the candidate set | `conditions: [{field, op, value}]`, `include_unknown: bool` (required) |
-| `find_similar` | Rank candidates against a listing | `listing`, `k=10`, `weights`, `max_per_estate=2`, `use_filtered_set` |
+| `find_similar` | Rank candidates against a listing | `listing`, `k=10`, `weights`, `max_per_estate=None` (only when the user asks for a spread), `use_filtered_set` |
 | `homogeneity_scores` | Prompt 2 | `listing` |
 | `reset_filters` | Start again within a conversation | none |
 
@@ -173,12 +174,13 @@ START -> agent <-> tools -> validate -> respond -> END
 
 | Layer | What | Cost |
 |---|---|---|
-| Tools | filter semantics (unknowns dropped/kept), estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
+| Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
 | Graph | scripted chat model replays chosen tool calls: state flows filter -> similarity, validation rejects an invented Property Id, retry stops after one | free, deterministic |
 | Tool-call evals | real model, `@pytest.mark.llm` (skipped by default): each case = prompt + expected calls and arguments | paid, run on request |
 
 Eval cases: the three brief prompts and rewordings; direction traps ("more than 10 miles" -> `<= 10`); ambiguity
-("the marketed property" with five listings -> ask or run all five, never pick silently); defaults (k = 10).
+("the marketed property" with five listings -> ask or run all five, never pick silently); defaults (k = 10, no
+estate cap unless the user asks for a spread).
 Arguments are compared field by field; each case runs several times and reports a pass rate, since model output
 varies.
 
@@ -213,7 +215,7 @@ Safeguards before sharing:
 ## Order of work
 
 1. `data.py` + tests
-2. `features.py` and `tools.py` + tests
+2. `similarity.py` and `tools.py` + tests
 3. `graph.py` + scripted-model tests
 4. LLM evals and example outputs (needs an API key; spend agreed first)
 5. Streamlit app, then deploy behind Access
