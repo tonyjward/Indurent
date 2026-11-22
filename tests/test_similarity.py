@@ -1,6 +1,6 @@
 """Tests for indurent_matching.similarity.
 
-Unit tests use small made-up frames. Tests taking the ``portfolio`` / ``marketed`` fixtures (tests/conftest.py)
+Unit tests use small made-up frames. Tests taking the `portfolio` / `marketed` fixtures (tests/conftest.py)
 check the scores against the similarity notebooks and are skipped when the data files aren't present.
 """
 

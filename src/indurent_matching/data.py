@@ -1,16 +1,16 @@
 """Load and clean the portfolio and marketed-listing spreadsheets.
 
-Each step follows a section of ``notebooks/01_eda.ipynb``, where the evidence for every rule is shown.
+Each step follows a section of `notebooks/01_eda.ipynb`, where the evidence for every rule is shown.
 The functions here only apply the decisions; they don't re-derive them.
 
-Step 0: load the raw files, rename columns to snake_case, key the portfolio by its existing ``property_id`` and
+Step 0: load the raw files, rename columns to snake_case, key the portfolio by its existing `property_id` and
 give the marketed listings ids (M1-M5, since their Property Id column is empty), parse the numeric columns, and
 describe the estate structure.
 
 Step 1 (EDA 2.1): size is square feet; flag implausibly small units, note very large ones.
 
 Step 2 (EDA 2.2, section 5): location confidence from the coastline and labelled-region checks, the region the
-coordinates fall in, and the nearest major city (trusted locations only). See ``geo.py``.
+coordinates fall in, and the nearest major city (trusted locations only). See `geo.py`.
 
 Step 3 (EDA 2.3): build year is left missing where blank (no filling from the estate) and noted.
 
@@ -31,15 +31,15 @@ sheds almost always have yards. So there is no "has a yard" feature, which would
 a unit was recorded. Only 34 units and none of the listings have a depth, so it is kept for filtering and
 context but not used for similarity; that exclusion lives in the similarity code, not here.
 
-Step 8 (EDA 2.8, 2.9): apply the known-issues register in ``config.py``, findings tied to particular Property Ids
+Step 8 (EDA 2.8, 2.9): apply the known-issues register in `config.py`, findings tied to particular Property Ids
 that no general rule can express (the 1173-1187 block, Granite Mews 59). EPC keeps only ratings A-G. It is
 context only and never scored: the ratings don't fit build year (post-2015 buildings are mostly E), so that
 caveat belongs to the whole column, not to individual rows, and gets no per-row notes.
 
 Quality is recorded on each row in two ways:
 
-* ``<field>_doubtful`` (True/False): the value is kept but not trusted, so similarity skips it.
-* ``quality_notes`` (list of str): plain-English reasons, passed to the AI so answers can explain them.
+* `<field>_doubtful` (True/False): the value is kept but not trusted, so similarity skips it.
+* `quality_notes` (list of str): plain-English reasons, passed to the AI so answers can explain them.
   A note without a flag is context only (e.g. "very large"); it doesn't remove the value from scoring.
 """
 
@@ -119,7 +119,7 @@ def parse_number(value: object) -> float:
 
     Numbers pass through. Text that is a number ("12", " -1.5 ") is converted. A range such as "20-28"
     becomes its midpoint (EDA 2.7). Anything else, including the placeholders seen in the data
-    (``X``, ``-``, ``TBC``), blanks and booleans, becomes NaN.
+    (`X`, `-`, `TBC`), blanks and booleans, becomes NaN.
 
     Zeros are returned as 0.0: whether zero means "not recorded" depends on the column, and is decided in
     that column's step.
@@ -160,7 +160,7 @@ def _read(path: Path) -> pd.DataFrame:
 
 
 def _parse_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply ``parse_number`` to every numeric column."""
+    """Apply `parse_number` to every numeric column."""
     df = df.copy()
     for col in NUMERIC:
         df[col] = df[col].map(parse_number).astype(float)
@@ -168,9 +168,9 @@ def _parse_numeric(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_note(df: pd.DataFrame, mask: pd.Series, template: str) -> None:
-    """Append a note to ``quality_notes`` for every row where ``mask`` is True (in place).
+    """Append a note to `quality_notes` for every row where `mask` is True (in place).
 
-    ``template`` is formatted with that row's values, e.g. "size {size_sqft:,.0f} sq ft: ...".
+    `template` is formatted with that row's values, e.g. "size {size_sqft:,.0f} sq ft: ...".
     """
     for idx in df.index[mask]:
         df.at[idx, "quality_notes"] = [*df.at[idx, "quality_notes"], template.format(**df.loc[idx])]
@@ -180,8 +180,8 @@ def clean_size(df: pd.DataFrame) -> pd.DataFrame:
     """Step 1 (EDA 2.1): read size as square feet, flag implausibly small units, note very large ones.
 
     The column is labelled sqm, but its total (30.6m) matches Indurent's published 28-40m sq ft and eaves
-    heights fit the sq ft reading, so the values are kept and the column renamed to ``size_sqft``. Thresholds are
-    in ``config.py``.
+    heights fit the sq ft reading, so the values are kept and the column renamed to `size_sqft`. Thresholds are
+    in `config.py`.
     """
     df = df.rename(columns={"size_sqm": "size_sqft"})
     small = df["size_sqft"] < MIN_PLAUSIBLE_SQFT
@@ -202,9 +202,9 @@ def clean_size(df: pd.DataFrame) -> pd.DataFrame:
 def clean_location(df: pd.DataFrame) -> pd.DataFrame:
     """Step 2 (EDA 2.2, section 5): judge how far each row's coordinates can be trusted.
 
-    Adds ``km_offshore``, ``km_to_region``, ``location_confidence`` (high / medium / unknown), ``derived_region``,
-    ``nearest_city`` and ``miles_to_city``. Coordinates are kept as recorded; ``location_confidence`` plays the
-    role of a doubtful flag, so there's no ``latitude_doubtful``. Unknown locations get no city distance.
+    Adds `km_offshore`, `km_to_region`, `location_confidence` (high / medium / unknown), `derived_region`,
+    `nearest_city` and `miles_to_city`. Coordinates are kept as recorded; `location_confidence` plays the
+    role of a doubtful flag, so there's no `latitude_doubtful`. Unknown locations get no city distance.
     """
     df = pd.concat([df, assess_locations(df)], axis=1)
     df = pd.concat([df, nearest_city(df, df["location_confidence"] != "unknown")], axis=1)
@@ -231,7 +231,7 @@ def clean_build_year(df: pd.DataFrame) -> pd.DataFrame:
     Units in the same estate differ by about 30 years (median), so filling a blank from the estate would be a
     guess. A unit without a build year simply has no age comparison.
 
-    Adds ``build_year_doubtful`` (False here). No general rule flags build years, but every scored field has a
+    Adds `build_year_doubtful` (False here). No general rule flags build years, but every scored field has a
     flag, so the similarity code can rely on it; the known-issues register (step 8) can set it.
     """
     df = df.copy()
@@ -260,18 +260,18 @@ def clean_eaves(df: pd.DataFrame) -> pd.DataFrame:
 def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
     """Step 6 (EDA 2.6): zero doors become missing; separate unit door counts from copied estate totals.
 
-    Adds ``doors_describe_unit``: True where the door count is the building's own, so similarity may use it.
+    Adds `doors_describe_unit`: True where the door count is the building's own, so similarity may use it.
     In a multi-unit estate where every unit shows the same count, the figure is an estate total copied onto each
     unit (it tracks estate size, not unit size), so it is False there. Those units also get
-    ``doors_per_unit_estimate`` (estate total / units in the estate) and a note, for display and explanation
+    `doors_per_unit_estimate` (estate total / units in the estate) and a note, for display and explanation
     only: the estimate rests on the estate-total reading and ignores unit size, so it is never scored.
 
     Multi-unit estates whose units show different counts (Crimson Quay 31, Topaz Arc 37) have counts that rise
     with unit size, so they are treated as the units' own. Listings have no estate structure; marketing particulars
     describe the unit for sale, so their counts are treated as their own. Missing doors get no note.
 
-    Adds ``doors_doubtful`` where a unit's own count gives fewer than ``MIN_SQFT_PER_DOOR`` sq ft per door, unless
-    the count is ``MAX_DOORS_ALWAYS_PLAUSIBLE`` or fewer (a few doors on a small unit is normal). This general rule
+    Adds `doors_doubtful` where a unit's own count gives fewer than `MIN_SQFT_PER_DOOR` sq ft per door, unless
+    the count is `MAX_DOORS_ALWAYS_PLAUSIBLE` or fewer (a few doors on a small unit is normal). This general rule
     also covers new listings, which the known-issues register (step 8) can't.
     """
     df = df.copy()
@@ -309,10 +309,10 @@ def clean_doors(df: pd.DataFrame) -> pd.DataFrame:
 def apply_known_issues(df: pd.DataFrame, issues: list[dict] = KNOWN_ISSUES) -> pd.DataFrame:
     """Step 8 (EDA 2.8, 2.9): flag the register's fields as doubtful for its Property Ids.
 
-    Adds or extends ``<field>_doubtful`` for every field the register names (False elsewhere, so both files get
+    Adds or extends `<field>_doubtful` for every field the register names (False elsewhere, so both files get
     the same columns), and one note per finding listing the values it flags, e.g. "doors 8, max_eaves_m 12.5: in
     a block of records ..., so doubtful". A field is flagged only where a value is recorded, so the flags count
-    values we're not trusting. Rows without a matching ``property_id`` (the listings) are untouched.
+    values we're not trusting. Rows without a matching `property_id` (the listings) are untouched.
     """
     df = df.copy()
     for issue in issues:
@@ -353,14 +353,14 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _order_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Put columns in ``COLUMN_ORDER``; any column not listed goes just before ``quality_notes``."""
+    """Put columns in `COLUMN_ORDER`; any column not listed goes just before `quality_notes`."""
     listed = [c for c in COLUMN_ORDER if c in df and c != "quality_notes"]
     others = [c for c in df if c not in COLUMN_ORDER]
     return df[[*listed, *others, "quality_notes"]]
 
 
 def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
-    """Add ``estate_units`` (units in the row's estate) and ``is_single_unit``.
+    """Add `estate_units` (units in the row's estate) and `is_single_unit`.
 
     Each row is one unit; an estate can hold one unit or many (EDA section 1). Values copied across a
     multi-unit estate are estate-level facts, which later steps need to know.
@@ -372,7 +372,7 @@ def add_estate_structure(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_portfolio(path: str | Path) -> pd.DataFrame:
-    """Load the portfolio file: one row per unit, keyed by the integer ``property_id``."""
+    """Load the portfolio file: one row per unit, keyed by the integer `property_id`."""
     df = _read(Path(path))
     if df["property_id"].isna().any() or not df["property_id"].is_unique:
         raise ValueError("portfolio property_id must be present and unique")
@@ -382,7 +382,7 @@ def load_portfolio(path: str | Path) -> pd.DataFrame:
 
 
 def load_marketed(path: str | Path) -> pd.DataFrame:
-    """Load the marketed-listings file, keyed by ``listing_id`` ("M1", "M2", ... in file order).
+    """Load the marketed-listings file, keyed by `listing_id` ("M1", "M2", ... in file order).
 
     The file has an empty Property Id column, so listings get their own ids. Estate structure is not
     added: a listing's estate isn't in the portfolio, so the file can't say how many units it has.

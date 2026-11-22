@@ -1,15 +1,15 @@
 """The tools the AI calls: plain Python functions over the cleaned data, with no LangGraph, model or API key.
 
-Each tool takes simple arguments a model can produce (``listing="M3"``, ``k=10``, a list of filter conditions) and
-returns a small JSON-friendly dictionary: a one-line ``summary``, the rows that matter (Property Ids, names, scores,
-key facts) and ``caveats`` the answer should pass on. The model never receives the whole table.
+Each tool takes simple arguments a model can produce (`listing="M3"`, `k=10`, a list of filter conditions) and
+returns a small JSON-friendly dictionary: a one-line `summary`, the rows that matter (Property Ids, names, scores,
+key facts) and `caveats` the answer should pass on. The model never receives the whole table.
 
-The filtered set of portfolio units (``candidates``, a list of Property Ids; None means the whole portfolio) is
-passed in and returned, not held here: ``graph.py`` keeps it in the conversation state. That keeps these functions
+The filtered set of portfolio units (`candidates`, a list of Property Ids; None means the whole portfolio) is
+passed in and returned, not held here: `graph.py` keeps it in the conversation state. That keeps these functions
 predictable, and usable from a notebook or the app without an AI.
 
-Every tool takes the data as its first argument (``Data``); ``graph.py`` fills that in, so the model only sees the
-other arguments. Bad arguments raise ``ToolError`` with a message written for the model to read and correct.
+Every tool takes the data as its first argument (`Data`); `graph.py` fills that in, so the model only sees the
+other arguments. Bad arguments raise `ToolError` with a message written for the model to read and correct.
 """
 
 from dataclasses import dataclass
@@ -33,7 +33,7 @@ class ToolError(ValueError):
 
 @dataclass(frozen=True)
 class Data:
-    """The cleaned portfolio and marketed listings, as returned by ``load_portfolio`` and ``load_marketed``."""
+    """The cleaned portfolio and marketed listings, as returned by `load_portfolio` and `load_marketed`."""
 
     portfolio: pd.DataFrame
     marketed: pd.DataFrame
@@ -117,7 +117,7 @@ def _listing_facts(listing: pd.Series) -> dict:
 
 
 def _candidate_rows(data: Data, candidates: list[int] | None) -> pd.DataFrame:
-    """The portfolio rows in the candidate set (the whole portfolio when ``candidates`` is None)."""
+    """The portfolio rows in the candidate set (the whole portfolio when `candidates` is None)."""
     if candidates is None:
         return data.portfolio
     unknown = sorted(set(candidates) - set(data.portfolio.index))
@@ -130,7 +130,15 @@ def _candidate_rows(data: Data, candidates: list[int] | None) -> pd.DataFrame:
 
 
 def list_listings(data: Data) -> dict:
-    """List the marketed listings that can be compared with the portfolio, with what each can be matched on."""
+    """List the marketed listings that can be compared with the portfolio, with what each can be matched on.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+
+    Returns:
+        `summary`, and `listings`: one entry per listing with its facts, `matched_on` (the blocks it can be
+        compared on) and `not_available` (the blocks it can't, with the reason).
+    """
     listings = [_listing_facts(row) for _, row in data.marketed.iterrows()]
     return {
         "summary": f"{len(listings)} marketed listings: {', '.join(x['listing_id'] for x in listings)}",
@@ -143,6 +151,18 @@ def get_listing(data: Data, listing: str) -> dict:
 
     Use this to resolve which property the user means. If a request says "the marketed property" and doesn't say
     which, ask, or answer for every listing; never pick one silently.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+        listing: the listing's id ("M3") or name ("Spitfire Park", "Spitfire Park, Unit 42"). Case doesn't matter,
+            and part of a name works if it matches only one listing.
+
+    Returns:
+        `summary`, the listing's facts, `matched_on` and `not_available`, `sits_on_estate` (the portfolio
+        estate it sits on, or null) and `quality_notes`.
+
+    Raises:
+        ToolError: no listing matches, or more than one does. The message lists the options.
     """
     row = _resolve_listing(data, listing)
     facts = _listing_facts(row)
@@ -216,20 +236,40 @@ def _describe(field: str, op: str, value) -> str:
 def filter_rows(data: Data, conditions: list[dict], include_unknown: bool, candidates: list[int] | None = None) -> dict:
     """Narrow the portfolio units to those meeting every condition, and return the new candidate set.
 
-    Each condition is ``{"field": ..., "op": ..., "value": ...}``; all must hold. Ops are ``<=``, ``>=``, ``<``,
-    ``>``, ``==``, ``in`` (a list) and ``between`` ([low, high], inclusive); text fields take ``==`` and ``in`` only.
+    Each condition is `{"field": ..., "op": ..., "value": ...}`; all must hold. Ops are `<=`, `>=`, `<`,
+    `>`, `==`, `in` (a list) and `between` ([low, high], inclusive); text fields take `==` and `in` only.
 
-    ``include_unknown`` is required: it decides what happens to units with no usable value for a condition's field
+    `include_unknown` is required: it decides what happens to units with no usable value for a condition's field
     (for distances, units whose location can't be trusted). True keeps them, False drops them; the summary always
     reports how many there were. **Default to False** (exclude them) unless the user asks to include them, or only
     asks to remove units *known* to fail the condition. Always say in the answer how many were left out, and offer
     to include them.
 
     Direction matters for wording like the brief's prompt 3: "excluding any property more than 10 miles from a
-    major city" means **keep** ``miles_to_city <= 10``. Prompt 3 then asks for the closest properties: pass the
-    returned ``candidates`` to ``find_nearest``.
+    major city" means **keep** `miles_to_city <= 10`. Prompt 3 then asks for the closest properties: pass the
+    returned `candidates` to `find_nearest`.
 
-    Starts from ``candidates`` (None: the whole portfolio), so filters can be applied one after another.
+    Starts from `candidates` (None: the whole portfolio), so filters can be applied one after another.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+        conditions: a list of `{"field": ..., "op": ..., "value": ...}`, all of which must hold.
+            `field` is one of: miles_to_city, nearest_city, size_sqft, build_year, derived_region,
+            location_confidence, epc_rating, estate_units, car_parking_spaces. `op` is `<=`, `>=`, `<`,
+            `>`, `==`, `in` or `between` (text fields: `==` and `in` only). `value` is a number or
+            text; a list for `in`; `[low, high]` for `between`.
+        include_unknown: required. True keeps units with no usable value for a condition's field; False drops
+            them (the default policy, above).
+        candidates: the Property Ids to start from, e.g. those returned by a previous `filter_rows`. None (the
+            default) starts from the whole portfolio.
+
+    Returns:
+        `summary`; `candidates` (the Property Ids kept, to pass to the next tool); `kept`,
+        `started_with`, `unknown` and `unknown_included`; and `conditions` as applied.
+
+    Raises:
+        ToolError: an unknown field, an operator that doesn't apply to the field, a malformed value,
+            `include_unknown` not true or false, or no conditions.
     """
     if not isinstance(include_unknown, bool):
         raise ToolError("include_unknown must be true or false: decide what happens to units with no value")
@@ -266,23 +306,31 @@ def filter_rows(data: Data, conditions: list[dict], include_unknown: bool, candi
 # --- Prompt 1: most similar --------------------------------------------------------------------------------------
 
 
-def _match_row(property_id, row: pd.Series, portfolio: pd.DataFrame) -> dict:
-    doubtful = [
-        f
-        for f in ("size_sqft", "build_year", "min_eaves_m", "max_eaves_m", "doors")
-        if portfolio.at[property_id, f"{f}_doubtful"]
-    ]
-    return {
-        "property_id": int(property_id),
-        "estate": row["industrial_estate_name"],
-        "unit": row["unit_name"],
-        "overall": _value(row["overall"], 3),
-        **{block: _value(row[block], 3) for block in BLOCKS},
-        "build_year": _value(row["build_year"], 0),
-        "size_sqft": _value(row["size_sqft"], 0),
-        "miles_from_listing": _value(row["miles_from_listing"], 1),
-        "doubtful_fields": doubtful,
-    }
+DOUBTFUL_FIELDS = ("size_sqft", "build_year", "min_eaves_m", "max_eaves_m", "doors")
+
+
+def _as_matches(result: pd.DataFrame, portfolio: pd.DataFrame) -> list[dict]:
+    """Turn the ranked table from `most_similar` into one JSON-friendly dictionary per unit, in rank order."""
+    matches = []
+    for property_id, row in result.iterrows():
+        flags = portfolio.loc[property_id]
+        matches.append(
+            {
+                "property_id": int(property_id),
+                "estate": row["industrial_estate_name"],
+                "unit": row["unit_name"],
+                "overall": _value(row["overall"], 3),
+                "age": _value(row["age"], 3),
+                "location": _value(row["location"], 3),
+                "physical": _value(row["physical"], 3),
+                "build_year": _value(row["build_year"], 0),
+                "size_sqft": _value(row["size_sqft"], 0),
+                "miles_from_listing": _value(row["miles_from_listing"], 1),
+                # Fields recorded for this unit but flagged doubtful, so an answer can mention them.
+                "doubtful_fields": [field for field in DOUBTFUL_FIELDS if flags[f"{field}_doubtful"]],
+            }
+        )
+    return matches
 
 
 def find_similar(
@@ -296,124 +344,98 @@ def find_similar(
     """The k portfolio units most similar to a marketed listing, best first (the brief's prompt 1).
 
     Similarity is scored separately on age, location and physical (size), each 0-1, and averaged with equal weights
-    unless ``weights`` says otherwise (only when the user asks for one dimension to count more). Blocks the listing
+    unless `weights` says otherwise (only when the user asks for one dimension to count more). Blocks the listing
     can't be compared on are dropped; a unit's unknown block counts as 0 and is shown as null.
 
     There's no cap on units per estate: units on the estate a listing sits on are genuinely among the most similar.
-    Set ``max_per_estate`` only when the user asks for a spread (e.g. "similar units on other estates").
+    Set `max_per_estate` only when the user asks for a spread (e.g. "similar units on other estates").
 
-    Searches ``candidates`` (None: the whole portfolio), e.g. the set returned by ``filter_rows``.
+    Searches `candidates` (None: the whole portfolio), e.g. the set returned by `filter_rows`.
 
-    For the *nearest* or *closest* properties on the map (the brief's prompt 3), use ``find_nearest`` instead.
+    For the *nearest* or *closest* properties on the map (the brief's prompt 3), use `find_nearest` instead.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+        listing: the listing's id ("M3") or name ("Spitfire Park", "Spitfire Park, Unit 42"). Case doesn't matter,
+            and part of a name works if it matches only one listing.
+        k: how many units to return, from 1 to 50 (default 10).
+        weights: relative weights for "age", "location" and "physical", e.g. `{"location": 2}`; blocks not named
+            keep weight 1. Only when the user asks for one dimension to count more.
+        max_per_estate: the most matches allowed from any one estate. Only when the user asks for a spread.
+        candidates: the Property Ids to search, e.g. the `candidates` returned by `filter_rows`. None (the
+            default) searches the whole portfolio.
+
+    Returns:
+        `summary`; `listing` (its facts); `matches`, best first, each with `property_id`, `estate`,
+        `unit`, `overall` and the `age`, `location` and `physical` scores (null: unknown for that unit),
+        `build_year`, `size_sqft`, `miles_from_listing` and `doubtful_fields`; and `caveats` to pass on.
+
+    Raises:
+        ToolError: `k` out of range, an unknown listing or Property Id, an empty candidate set, an unknown block
+            in `weights`, or a listing with nothing to compare.
     """
+    # 1. Check the arguments and find the listing and the units to search.
     if not isinstance(k, int) or not 1 <= k <= 50:
         raise ToolError("k must be a whole number from 1 to 50")
-    row = _resolve_listing(data, listing)
-    pool = _candidate_rows(data, candidates)
+    row = _resolve_listing(data, listing)  # "M3" or "Spitfire Park" -> the listing's row
+    pool = _candidate_rows(data, candidates)  # the filtered set, or the whole portfolio
     if pool.empty:
         raise ToolError("The candidate set is empty: there's nothing to compare against")
+
+    # 2. Rank the units (the scoring itself is in similarity.most_similar).
     try:
         result = most_similar(row, pool, k=k, weights=weights, max_per_estate=max_per_estate)
-    except ValueError as error:
+    except ValueError as error:  # e.g. an unknown block in weights: pass the message on to the model
         raise ToolError(str(error)) from error
+    matches = _as_matches(result, data.portfolio)  # the ranked table -> one dictionary per unit
 
-    matches = [_match_row(pid, r, data.portfolio) for pid, r in result.iterrows()]
+    # 3. Caveats: anything the answer should tell the user about how these matches were found.
     blocks = _matched_on(row)
     caveats = []
+
+    # The listing can't be compared on every block (e.g. M2 has no build year or location).
     if blocks["not_available"]:
         missing = "; ".join(f"{block} ({reason})" for block, reason in blocks["not_available"].items())
         caveats.append(f"Matched on {' and '.join(blocks['matched_on'])} only. Not available: {missing}.")
+
+    # The listing sits on an estate Indurent owns: say so, and how many matches are on it.
     estate = sits_on_estate(row, data.portfolio)
-    on_estate = int((result["industrial_estate_name"] == estate).sum()) if estate else 0
     if estate:
+        on_estate = int((result["industrial_estate_name"] == estate).sum())
         caveats.append(
             f"The listing sits on {estate}, an estate Indurent already owns; {on_estate} of the "
             f"{len(result)} matches are on it."
         )
+
+    # Some matches have no usable location, so they scored 0 on it.
     if "location" in blocks["matched_on"]:
         unknown = int(result["location"].isna().sum())
         if unknown:
             caveats.append(f"{unknown} match(es) have no usable location (counted as 0 on location).")
+
+    # Matched on size alone: many units can score about the same, so the list is one of several.
     if blocks["matched_on"] == ["physical"] and len(result):
         everything = most_similar(row, pool, k=len(pool))
-        threshold = round(result["overall"].iloc[-1], 2)
+        threshold = round(result["overall"].iloc[-1], 2)  # the last match's score, to 2 decimal places
         ties = int((everything["overall"].round(2) >= threshold).sum())
         if ties > len(result):
             caveats.append(
                 f"{ties} units score {threshold:.2f} or more on size alone, so the list is one of several "
                 "equally good ones."
             )
+
+    # Anything that changed the search from the default.
     if candidates is not None:
         caveats.append(f"Searched a filtered set of {len(pool):,} units, not the whole portfolio.")
     if weights:
         caveats.append(f"Weights changed from equal: {weights}.")
     if max_per_estate is not None:
         caveats.append(f"At most {max_per_estate} unit(s) per estate, as requested.")
+
+    # 4. The result the model receives.
     return {
         "summary": f"Top {len(matches)} matches for {row['listing_id']} ({row['industrial_estate_name']}, "
         f"{row['unit_name']}) from {len(pool):,} units",
-        "listing": _listing_facts(row),
-        "matches": matches,
-        "caveats": caveats,
-    }
-
-
-# --- Prompt 3: nearest on the map ---------------------------------------------------------------------------------
-
-
-def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | None = None) -> dict:
-    """The k portfolio units nearest to a marketed listing on the map, by straight-line miles (the brief's prompt 3).
-
-    "Closest properties" means nearest on the map, not most similar (use ``find_similar`` for that). For prompt 3,
-    first narrow the portfolio with ``filter_rows`` (keep ``miles_to_city <= 10``) and pass its ``candidates``.
-
-    Units without a usable location can't be placed, so they're left out, and the caveats say how many. A listing
-    without a usable location (no coordinates, or offshore) can't be used at all: that's an error, with the reason.
-    """
-    if not isinstance(k, int) or not 1 <= k <= 50:
-        raise ToolError("k must be a whole number from 1 to 50")
-    row = _resolve_listing(data, listing)
-    blocks = _matched_on(row)
-    if "location" not in blocks["matched_on"]:
-        raise ToolError(
-            f"{row['listing_id']} can't be placed on the map: {blocks['not_available']['location']}. "
-            "Nearest properties can't be found for it; say so in the answer."
-        )
-    pool = _candidate_rows(data, candidates)
-    miles = miles_to_units(row, pool)
-    placed = miles.dropna().sort_index().sort_values(kind="stable")  # ties: Property Id order
-    nearest = placed.head(k)
-    matches = [
-        {
-            "property_id": int(pid),
-            "estate": pool.at[pid, "industrial_estate_name"],
-            "unit": pool.at[pid, "unit_name"],
-            "miles_from_listing": _value(m, 1),
-            "build_year": _value(pool.at[pid, "build_year"], 0),
-            "size_sqft": _value(pool.at[pid, "size_sqft"], 0),
-            "nearest_city": _value(pool.at[pid, "nearest_city"]),
-            "miles_to_city": _value(pool.at[pid, "miles_to_city"], 1),
-        }
-        for pid, m in nearest.items()
-    ]
-    caveats = []
-    unplaced = int(miles.isna().sum())
-    if unplaced:
-        caveats.append(
-            f"{unplaced:,} of the {len(pool):,} units searched have no usable location, so couldn't be ranked."
-        )
-    estate = sits_on_estate(row, data.portfolio)
-    if estate:
-        on_estate = sum(m["estate"] == estate for m in matches)
-        caveats.append(
-            f"The listing sits on {estate}, an estate Indurent already owns; {on_estate} of the "
-            f"{len(matches)} nearest are on it."
-        )
-    if candidates is not None:
-        caveats.append(f"Searched a filtered set of {len(pool):,} units, not the whole portfolio.")
-    return {
-        "summary": f"The {len(matches)} units nearest to {row['listing_id']} ({row['industrial_estate_name']}, "
-        f"{row['unit_name']}) on the map, from {len(placed):,} units with a usable location",
         "listing": _listing_facts(row),
         "matches": matches,
         "caveats": caveats,
@@ -432,8 +454,21 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
     """How typical a marketed listing is of the portfolio, scored separately on age, location and physical (prompt 2).
 
     Each score is 0-1, where 1 is the most typical value in the portfolio; null means not available, with the reason
-    in ``not_available``. ``location_context`` and ``size_context`` explain the scores and aren't scored. State the
-    interpretation (``meaning``) in the answer.
+    in `not_available`. `location_context` and `size_context` explain the scores and aren't scored. State the
+    interpretation (`meaning`) in the answer.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+        listing: the listing's id ("M3") or name ("Spitfire Park", "Spitfire Park, Unit 42"). Case doesn't matter,
+            and part of a name works if it matches only one listing.
+
+    Returns:
+        `summary`; `meaning` (the interpretation to state); `scores` for `age`, `location` and
+        `physical` (0-1, or null when not available); `not_available` (the reasons); `location_context`;
+        `size_context`; and `listing` (its facts).
+
+    Raises:
+        ToolError: no listing matches, or more than one does.
     """
     row = _resolve_listing(data, listing)
     result = homogeneity_scores(row, data.portfolio)
@@ -446,4 +481,102 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
         "location_context": {key: _value(v, 1) for key, v in result["location_context"].items()},
         "size_context": {key: _value(v, 1) for key, v in result["size_context"].items()},
         "listing": _listing_facts(row),
+    }
+
+
+# --- Prompt 3: nearest on the map ---------------------------------------------------------------------------------
+
+
+def _as_nearest(nearest: pd.Series, pool: pd.DataFrame) -> list[dict]:
+    """Turn the nearest units (miles, indexed by Property Id) into one JSON-friendly dictionary per unit, nearest first."""
+    matches = []
+    for property_id, miles in nearest.items():
+        unit = pool.loc[property_id]
+        matches.append(
+            {
+                "property_id": int(property_id),
+                "estate": unit["industrial_estate_name"],
+                "unit": unit["unit_name"],
+                "miles_from_listing": _value(miles, 1),
+                "build_year": _value(unit["build_year"], 0),
+                "size_sqft": _value(unit["size_sqft"], 0),
+                "nearest_city": _value(unit["nearest_city"]),
+                "miles_to_city": _value(unit["miles_to_city"], 1),
+            }
+        )
+    return matches
+
+
+def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | None = None) -> dict:
+    """The k portfolio units nearest to a marketed listing on the map, by straight-line miles (the brief's prompt 3).
+
+    "Closest properties" means nearest on the map, not most similar (use `find_similar` for that). For prompt 3,
+    first narrow the portfolio with `filter_rows` (keep `miles_to_city <= 10`) and pass its `candidates`.
+
+    Units without a usable location can't be placed, so they're left out, and the caveats say how many. A listing
+    without a usable location (no coordinates, or offshore) can't be used at all: that's an error, with the reason.
+
+    Args:
+        data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
+        listing: the listing's id ("M3") or name ("Spitfire Park", "Spitfire Park, Unit 42"). Case doesn't matter,
+            and part of a name works if it matches only one listing.
+        k: how many units to return, from 1 to 50 (default 10).
+        candidates: the Property Ids to search, e.g. the `candidates` returned by `filter_rows`. None (the
+            default) searches the whole portfolio.
+
+    Returns:
+        `summary`; `listing` (its facts); `matches`, nearest first, each with `property_id`, `estate`,
+        `unit`, `miles_from_listing`, `build_year`, `size_sqft`, `nearest_city` and `miles_to_city`;
+        and `caveats` to pass on.
+
+    Raises:
+        ToolError: `k` out of range, an unknown listing or Property Id, or a listing with no usable location.
+    """
+    # 1. Check the arguments, find the listing, and make sure it can be placed on the map.
+    if not isinstance(k, int) or not 1 <= k <= 50:
+        raise ToolError("k must be a whole number from 1 to 50")
+    row = _resolve_listing(data, listing)  # "M3" or "Spitfire Park" -> the listing's row
+    blocks = _matched_on(row)
+    if "location" not in blocks["matched_on"]:  # no coordinates, or offshore
+        raise ToolError(
+            f"{row['listing_id']} can't be placed on the map: {blocks['not_available']['location']}. "
+            "Nearest properties can't be found for it; say so in the answer."
+        )
+    pool = _candidate_rows(data, candidates)  # the filtered set, or the whole portfolio
+
+    # 2. Rank the units by distance. Units with no usable location have no distance, so they're left out.
+    miles = miles_to_units(row, pool)
+    placed = miles.dropna().sort_index().sort_values(kind="stable")  # nearest first; ties in Property Id order
+    matches = _as_nearest(placed.head(k), pool)  # the k nearest -> one dictionary per unit
+
+    # 3. Caveats: anything the answer should tell the user about how these were found.
+    caveats = []
+
+    # Units that couldn't be ranked because their location isn't usable.
+    unplaced = int(miles.isna().sum())
+    if unplaced:
+        caveats.append(
+            f"{unplaced:,} of the {len(pool):,} units searched have no usable location, so couldn't be ranked."
+        )
+
+    # The listing sits on an estate Indurent owns: say so, and how many of the nearest are on it.
+    estate = sits_on_estate(row, data.portfolio)
+    if estate:
+        on_estate = sum(match["estate"] == estate for match in matches)
+        caveats.append(
+            f"The listing sits on {estate}, an estate Indurent already owns; {on_estate} of the "
+            f"{len(matches)} nearest are on it."
+        )
+
+    # The search was over a filtered set, not the whole portfolio.
+    if candidates is not None:
+        caveats.append(f"Searched a filtered set of {len(pool):,} units, not the whole portfolio.")
+
+    # 4. The result the model receives.
+    return {
+        "summary": f"The {len(matches)} units nearest to {row['listing_id']} ({row['industrial_estate_name']}, "
+        f"{row['unit_name']}) on the map, from {len(placed):,} units with a usable location",
+        "listing": _listing_facts(row),
+        "matches": matches,
+        "caveats": caveats,
     }

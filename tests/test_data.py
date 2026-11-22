@@ -1,6 +1,6 @@
 """Tests for indurent_matching.data.
 
-Unit tests use small made-up frames. Tests taking the ``portfolio`` / ``marketed`` fixtures (tests/conftest.py)
+Unit tests use small made-up frames. Tests taking the `portfolio` / `marketed` fixtures (tests/conftest.py)
 use the assessment files in data/ and are skipped when those files aren't present.
 """
 

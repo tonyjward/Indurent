@@ -1,7 +1,7 @@
 """Tests for indurent_matching.tools.
 
-The filter tests use a small made-up portfolio; the others use the assessment files (via the ``portfolio`` and
-``marketed`` fixtures in tests/conftest.py) and are skipped when those aren't present.
+The filter tests use a small made-up portfolio; the others use the assessment files (via the `portfolio` and
+`marketed` fixtures in tests/conftest.py) and are skipped when those aren't present.
 """
 
 import json

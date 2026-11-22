@@ -1,7 +1,7 @@
-"""Build the UK boundary file used by ``indurent_matching.geo``.
+"""Build the UK boundary file used by `indurent_matching.geo`.
 
 Extracts the UK land outline and the regions (named as the dataset names them) from Natural Earth 1:10m
-(public domain, https://www.naturalearthdata.com/) and writes them to ``data/geo/uk_boundaries.geojson``.
+(public domain, https://www.naturalearthdata.com/) and writes them to `data/geo/uk_boundaries.geojson`.
 That file is committed (the rest of data/ is gitignored), so no download is needed at run time. Rerun only to
 refresh the boundaries:
 

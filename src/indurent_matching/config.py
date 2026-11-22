@@ -1,6 +1,6 @@
 """Thresholds and settings for cleaning and matching.
 
-Each value cites the EDA section (``notebooks/01_eda.ipynb``) where the evidence for it is shown.
+Each value cites the EDA section (`notebooks/01_eda.ipynb`) where the evidence for it is shown.
 """
 
 # --- Size (EDA 2.1) ---------------------------------------------------------------------------------------------

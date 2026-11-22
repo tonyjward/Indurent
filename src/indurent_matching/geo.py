@@ -1,7 +1,7 @@
 """Location checks: how far each point is from the UK coast and from its labelled region, and its nearest city.
 
 Implements EDA 2.2 and section 5. Boundaries are the UK land outline and regions in
-``data/geo/uk_boundaries.geojson`` (Natural Earth 1:10m, public domain; built by ``scripts/build_boundaries.py``),
+`data/geo/uk_boundaries.geojson` (Natural Earth 1:10m, public domain; built by `scripts/build_boundaries.py`),
 with regions named as the dataset names them. Distances are measured in metres on the British National Grid.
 """
 
@@ -32,16 +32,16 @@ def assess_locations(df: pd.DataFrame) -> pd.DataFrame:
     """Check each row's coordinates against the coastline and its labelled region.
 
     Args:
-        df: rows with ``latitude``, ``longitude`` and ``region`` (the dataset's own label).
+        df: rows with `latitude`, `longitude` and `region` (the dataset's own label).
 
     Returns:
         A frame on the same index with:
 
-        * ``km_offshore``: distance from the UK coast (0 on land); NaN without coordinates.
-        * ``km_to_region``: distance from the labelled region (0 inside it); NaN without coordinates or label.
-        * ``location_confidence``: ``high`` within ``REGION_TOLERANCE_KM`` of the labelled region; ``medium`` on
-          land (or within ``COAST_TOLERANCE_KM`` of the coast) but outside it; ``unknown`` otherwise.
-        * ``derived_region``: the region the coordinates fall in (nearest region), for high and medium only.
+        * `km_offshore`: distance from the UK coast (0 on land); NaN without coordinates.
+        * `km_to_region`: distance from the labelled region (0 inside it); NaN without coordinates or label.
+        * `location_confidence`: `high` within `REGION_TOLERANCE_KM` of the labelled region; `medium` on
+          land (or within `COAST_TOLERANCE_KM` of the coast) but outside it; `unknown` otherwise.
+        * `derived_region`: the region the coordinates fall in (nearest region), for high and medium only.
     """
     land, regions = _boundaries()
     out = pd.DataFrame(index=df.index)
@@ -81,7 +81,7 @@ def haversine_miles(lat1, lon1, lat2, lon2):
 
 
 def nearest_city(df: pd.DataFrame, usable: pd.Series) -> pd.DataFrame:
-    """Nearest of ``MAJOR_CITIES`` and the distance to it in miles, for rows where ``usable`` is True.
+    """Nearest of `MAJOR_CITIES` and the distance to it in miles, for rows where `usable` is True.
 
     Rows whose location isn't trusted get NaN, so they fall into the "unknown" group of any distance filter
     instead of being counted as near or far (EDA section 5).
