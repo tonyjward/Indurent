@@ -178,6 +178,16 @@ def location_context(listing: pd.Series, portfolio: pd.DataFrame) -> dict:
     }
 
 
+def miles_to_units(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
+    """Straight-line miles from the listing to each portfolio unit, on the portfolio's index.
+
+    NaN for units without a usable location, and for every unit if the listing has none.
+    """
+    if not has_usable_location(listing):
+        return pd.Series(np.nan, index=portfolio.index)
+    return _miles_from(listing, portfolio).where(has_usable_location(portfolio))
+
+
 def location_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
     """How close the listing is to each portfolio unit, from 0 to 1 (prompt 1).
 
@@ -188,10 +198,7 @@ def location_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Serie
     Returns one score per portfolio unit, on the portfolio's index. A unit without a usable location gets NaN
     ("not available"), and so does every unit if the listing has no usable location.
     """
-    if not has_usable_location(listing):
-        return pd.Series(np.nan, index=portfolio.index)
-    miles = _miles_from(listing, portfolio).where(has_usable_location(portfolio))
-    return halving(miles, LOCATION_HALF_LIFE_MILES)
+    return halving(miles_to_units(listing, portfolio), LOCATION_HALF_LIFE_MILES)
 
 
 # --- Physical: size (notebook 04) --------------------------------------------------------------------------------
@@ -337,7 +344,7 @@ def most_similar(
     block_weights = pd.Series({block: weights[block] for block in used})
     overall = scores[used].fillna(0).mul(block_weights).sum(axis=1) / block_weights.sum()
 
-    miles = _miles_from(listing, portfolio).where(has_usable_location(portfolio)) if "location" in used else np.nan
+    miles = miles_to_units(listing, portfolio) if "location" in used else np.nan
     result = pd.DataFrame(
         {
             "industrial_estate_name": portfolio["industrial_estate_name"],

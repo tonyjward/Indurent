@@ -144,6 +144,7 @@ summaries, so the model never receives the full table.
 | `list_listings` | What can be compared | none |
 | `get_listing` | Resolve "the marketed property" to one listing, with its own quality notes | `name` |
 | `filter_rows` | Narrow the candidate set | `conditions: [{field, op, value}]`, `include_unknown: bool` (required) |
+| `find_nearest` | Prompt 3: the nearest units on the map ("closest" means nearest, not most similar) | `listing`, `k=10`, `candidates` |
 | `find_similar` | Rank candidates against a listing | `listing`, `k=10`, `weights`, `max_per_estate=None` (only when the user asks for a spread), `use_filtered_set` |
 | `homogeneity_scores` | Prompt 2 | `listing` |
 | `reset_filters` | Start again within a conversation | none |
@@ -151,6 +152,10 @@ summaries, so the model never receives the full table.
 - `field` and `op` are enums; schemas are strict (`additionalProperties: false`).
 - `include_unknown` is required so every filter decides explicitly what happens to units with missing values
   (the within / beyond / unknown rule). Summaries always report how many were excluded as unknown.
+- **Policy: exclude unknowns by default**, unless the user asks to include them or only asks to remove units known
+  to fail the condition. The answer always states how many were left out and offers to include them. The system
+  prompt repeats this, and the `validate` step checks the count is mentioned whenever a filter was used. For prompt
+  3 the choice doesn't change the ranking: `find_nearest` can't rank units without a usable location anyway.
 - EPC is allowed as a *filter* (the user's explicit choice), with the reliability caveat carried in the summary.
 - Tool descriptions state conventions, e.g. "excluding properties more than 10 miles from a major city" means
   `miles_to_city <= 10`.
