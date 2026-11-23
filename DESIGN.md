@@ -19,9 +19,13 @@ src/indurent_matching/
   config.py      thresholds, city list, known-issues register
   similarity.py  homogeneity scores and pairwise similarity per block   (step 2: vectorise)
   tools.py       filter_rows, find_similar, homogeneity_scores, ...     (step 3: retrieval)
-  graph.py       LangGraph StateGraph, system prompt, output schema     (steps 4-5: prompt + answer)
-app/app.py       Streamlit front end over the same modules
-tests/           tools, graph (scripted model), LLM tool-call evals
+  graph.py       LangGraph StateGraph, system prompt                    (steps 4-5: prompt + answer)
+  chat.py        stream an answer and read back its tool calls (for the app)
+  evals.py       the eval checks: trajectory, numbers, LLM judge, right answer
+  studio.py      the graph on the real data, for LangGraph Studio
+app/app.py       Streamlit chat page over the same modules
+evals/           eval cases, the runner (real Claude calls) and a free rescorer
+tests/           data, similarity, tools, graph and app (scripted model), eval checks
 deploy/          systemd unit for beast
 ```
 
@@ -189,18 +193,26 @@ START -> agent <-> tools -> END
 | Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
 | Graph | scripted chat model replays chosen tool calls: the filter flows from `filter_rows` into the search tools only with `use_filter`, `refine` and `reset_filters` work, tool errors come back as messages | free, deterministic |
 | App | Streamlit AppTest of the real page with the scripted model: prompt buttons, streaming, the tool-call panel, New chat, errors shown in the chat | free, deterministic |
+| Eval checks | each check against good and deliberately wrong answers (a dropped unit, a swapped value, an invented figure) | free, deterministic |
 | Evals | the real agent (Claude) on 12 cases, checked by code and by an LLM judge (`evals/`) | paid, run on request |
 
 ### Evals
 
-`uv run python evals/run_evals.py` runs each case in a fresh conversation and applies three checks, cheapest first:
+`uv run python evals/run_evals.py` runs each case in a fresh conversation and applies four checks, cheapest first:
 
 1. **Trajectory (code):** the tool calls each case expects, in order, with the arguments that matter (other calls
    in between are fine), and any tools it mustn't use.
 2. **Numbers (code):** every number in the answer must appear in a tool result or the question. This catches
    invented scores, distances, counts and Property Ids, and is the check a production validation step would run.
-3. **Judge (Claude, low effort, structured output):** reads the tool results and the answer, and lists claims the
-   results don't support, caveats the answer leaves out, and whether it behaved as the case expects.
+3. **Judge (Claude, low effort, structured output):** reads the system prompt, the tool results and the answer,
+   and lists claims the results don't support, caveats the answer leaves out, and whether it behaved as the case
+   expects.
+4. **Right answer (code):** each case has a reference answer worked out by calling the tools directly with the
+   right arguments (the tools' own tests check those results). The units the answer lists must be the reference
+   ranking, in order, each with its own value on its row; required counts must appear; an out-of-scope answer
+   must contain no invented figure. The first three checks can't see a dropped unit, a wrong order, or one unit's
+   distance shown against another. Added after the runs below, and applied to the saved answers with
+   `evals/rescore.py` (free).
 
 The 12 cases: the brief's three prompts word for word; variations (a named listing, a listing with size only,
 nearest by estate name, location weighted double, a two-turn refine, including unknowns when asked, an EPC filter
@@ -280,24 +292,59 @@ was missing. Trajectory and numbers passed on every case, as in the second run. 
 With one run per case, totals move by a case or two from run to run (the agent and the judge both vary), so the
 pass rate is measured with `--repeats 3`.
 
+### The final measurement (2026-11-23)
+
+All 12 cases, 3 runs each (36 runs, $3.52), after the third round of fixes:
+
+| Check | Passed |
+|---|---|
+| Trajectory (right tools and arguments) | 36 of 36 |
+| Numbers (none invented) | 35 of 36 |
+| Judge (no unsupported claims, right behaviour) | 25 of 36 |
+| Right answer (scored afterwards on the saved answers) | **36 of 36** |
+| All four | 24 of 36 (67%), against 6 of 12 (50%) on the first run |
+
+**Every one of the 36 answers reported the right result:** the right units, in the right order, with the right
+values, and the counts the user needs. The agent's tool use is reliable. The judge failures are all about wording:
+a sentence that goes a little beyond what the tools say.
+
+| Case | Runs | What went wrong |
+|---|---|---|
+| similar to M3, size only (M2), weighted location, refine, EPC filter, prompt 2 | PPP | |
+| include unknowns, guess M2's build year | PFP | one-off slips |
+| rent for M3 | FFP | declined correctly, then called some units "the strongest benchmarks" without evidence |
+| nearest to Spitfire Park | PFF | commented on the order of tied units, which the tool doesn't give |
+| prompt 1 (most similar) | FFF | "weighted equally" said of all five listings; M2 is scored on size alone, M5 without location |
+| prompt 3 (closest, within 10 miles) | FFF | "the owned estate's units were removed because they're over 10 miles from a city"; the tool only says the filter removed them (they could also have had no location) |
+
+Tuning stopped here. The gaps that were in the tools were closed round by round; what's left is the model
+overreaching in its own words, and tuning further against these 12 cases would make the score say less about new
+questions. The prompt 3 gap is one more of the tool kind (the caveat could say why the units were removed), and
+the production validation step (section 7) is the guard for the rest.
+
 ## 6. Streamlit app and deployment
 
-Pages: **Ask** (chat, with the tool calls and arguments shown), **Example prompts** (stored outputs for the three
-brief prompts, no API call), **Explore** (the same tools with sliders, no LLM), **Data quality** (key EDA
-findings and the decisions table).
+`app/app.py` is one chat page, like Claude or ChatGPT: the sidebar has New chat and the marketed listings (their
+facts and data-quality notes on hover); a new conversation offers the brief's three prompts as buttons; answers
+stream in as they're written; and **How this was worked out** under each answer lists the tool calls, with their
+arguments and a one-line outcome, so every number can be traced to a tool. Conversation memory is per browser
+session (`InMemorySaver`). The data is loaded once for all visitors.
 
-Deployment on beast, the same mechanism as the fpl API:
+It's live, served from beast the same way as the fpl app. The address isn't written in the repo, because the app
+is open (below) and every question costs money:
 
-1. `deploy/indurent-app.service` runs Streamlit bound to `127.0.0.1:8503` (8501 and 8502 are taken by fpl).
-2. A public hostname on the existing shed Cloudflare Tunnel points at `http://localhost:8503`.
-3. `data/` is copied across by hand (gitignored).
+1. `~/repos/Indurent` on beast is a git remote (`beast`) of the laptop's repo. `data/*.xlsx` and `.env` are
+   copied across by hand (both gitignored).
+2. `deploy/indurent-app.service` (systemd) runs Streamlit bound to `127.0.0.1:8503` (fpl has 8501 and 8502), and
+   restarts it if it stops.
+3. A published application route on the existing Cloudflare Tunnel maps the app's hostname to
+   `http://localhost:8503`. Nothing on beast is open to the internet; Cloudflare provides HTTPS.
 
-Safeguards before sharing:
+To deploy a change: `git push beast main` from the laptop, then `sudo systemctl restart indurent-app` on beast.
 
-- **Cloudflare Access** (email one-time PIN, allowlist of the interviewers and Tony): the assessment data is kept
-  private as a precaution (the brief doesn't say it's confidential), and access limits who can spend on the API key.
-- A separate Anthropic workspace/key with its own spend limit, and a per-session message cap.
-- Stored example outputs, so the app is useful even if the key is off or the limit is hit.
+**Open for now.** Anyone with the link can use it, and each question costs about $0.10-0.15 on the Anthropic key.
+To restrict it, add a Cloudflare Access application for the hostname (email one-time PIN, an allowlist of
+addresses); a spend limit on the Anthropic workspace is a backstop either way.
 
 ## 7. Production notes (for the write-up)
 
@@ -306,12 +353,14 @@ Safeguards before sharing:
 - Move vectors to pgvector/FAISS once the portfolio or listing volume justifies it; precompute portfolio blocks.
 - Retrieval over the methodology itself (decisions, EDA findings) so the model can explain *why* a rule applies.
 - Estate-level summaries as a second retrieval unit ("which estates does this listing resemble?").
-- Tracing (LangSmith/OpenTelemetry), eval runs in CI on a fixed budget, prompt caching for the system prompt.
+- Tracing is on (LangSmith, with evals in their own project); next would be eval runs in CI on a fixed budget, and
+  prompt caching for the system prompt.
 - **A validation step in the graph** (`agent <-> tools -> validate -> END`, with `validate` able to send an answer
   back once): plain code that checks every Property Id the answer cites was returned by a tool in this turn, and
   that a filter's unknown count is reported. A failing answer goes back to the model with the problem; a second
   failure goes out with the problem stated. Left out here to keep the demo graph simple: the system prompt carries
-  the rules, and tests cover the tools and the state flow.
+  the rules, and tests cover the tools and the state flow. The evals' number and right-answer checks are this
+  step's code, and the judge's findings (section 5) are what it would catch.
 - Structured output for answers (matches, scores, caveats as fields), so the app renders tables rather than prose.
 
 ## Order of work
@@ -320,4 +369,4 @@ Safeguards before sharing:
 2. `similarity.py` and `tools.py` + tests
 3. `graph.py` + scripted-model tests
 4. LLM evals and example outputs (needs an API key; spend agreed first)
-5. Streamlit app, then deploy behind Access
+5. Streamlit app, then deploy (open for now; Access when needed)

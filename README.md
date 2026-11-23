@@ -6,8 +6,6 @@ similarity, retrieval over the portfolio, and an LLM to interpret requests and e
 - **How it works and why:** [`DESIGN.md`](DESIGN.md)
 - **Data-quality evidence behind every cleaning rule:** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)
 
-> Work in progress: data preparation, similarity, the tools and the agent are done; the web app follows.
-
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 if needed).
@@ -59,6 +57,38 @@ Flags come from general rules (run on every row, including new listings) and fro
 data is refreshed**; its Property Ids may no longer apply.
 
 To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipynb`.
+
+## The web app
+
+A chat page over the agent: ask about the marketed listings, or click one of the brief's three prompts. Under each
+answer, **How this was worked out** lists the tool calls behind it. With `ANTHROPIC_API_KEY` in `.env` (see the
+Studio section below for the variables):
+
+```bash
+uv run streamlit run app/app.py     # http://localhost:8501
+```
+
+It's deployed on beast behind a Cloudflare Tunnel (DESIGN.md section 6; the address isn't in the repo while the
+app is open). To deploy a change:
+`git push beast main`, then on beast `sudo systemctl restart indurent-app`. `deploy/indurent-app.service` has the
+one-off install steps.
+
+## Evals
+
+The agent is tested against real Claude on 12 cases (the brief's prompts, variations, and questions it should
+decline), with four checks: the right tool calls, no invented numbers, no unsupported claims (Claude as judge), and
+the right answer against a reference worked out from the tools. Results and what they led to are in DESIGN.md
+section 5.
+
+```bash
+uv run python evals/run_evals.py                     # every case once (about $1.20); stops at --budget (default $50)
+uv run python evals/run_evals.py --repeats 3         # three runs each, for pass rates (about $3.50)
+uv run python evals/run_evals.py --cases scope_rent  # chosen cases only
+uv run python evals/rescore.py data/evals/<run>      # re-check a saved run's answers (free)
+```
+
+Each run saves `results.json` and `report.md` in a dated folder under `data/evals/` (gitignored: the answers contain
+portfolio data). Traces go to LangSmith; `LANGSMITH_PROJECT=indurent-evals` keeps them apart from the app's.
 
 ## Viewing the graph in LangSmith Studio
 
@@ -115,10 +145,16 @@ src/indurent_matching/   the package
   similarity.py          the three similarity blocks (age, location, size) and how they combine
   tools.py               the functions the AI calls: plain Python, no LangGraph or model
   graph.py               the LangGraph agent: Claude with the tools
+  chat.py                streams an answer and reads back its tool calls (for the app)
+  evals.py               the eval checks (trajectory, numbers, judge, right answer)
   studio.py              builds the graph on the real data for LangGraph Studio
+app/                     the Streamlit web app (app.py) and its logo
+evals/                   eval cases, the runner and the rescorer
+deploy/                  the systemd service that runs the app on beast
 notebooks/               01 EDA; 02-04 similarity by block; 05 prompt 1; 06 the similarity functions;
                          07 prompt 2; 08 the tools
-tests/                   pytest suite (conftest.py loads the spreadsheets once for the real-data tests)
+tests/                   pytest suite, no API calls (conftest.py loads the spreadsheets once; scripted.py is a
+                         fake chat model)
 scripts/                 the brief prompts run and the boundaries build (see above and below)
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
 langgraph.json           tells `langgraph dev` where the graph is
@@ -129,7 +165,7 @@ langgraph.json           tells `langgraph dev` where the graph is
 Each module is listed under the module that uses it:
 
 ```
-studio.py / the app            loads the data and builds the agent
+studio.py / app/app.py         loads the data and builds the agent
 ├── data.py                    loads and cleans the spreadsheets
 │   └── geo.py                 coastline and region checks, distances
 └── graph.py                   the LangGraph agent: Claude with the tools
