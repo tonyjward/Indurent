@@ -210,8 +210,8 @@ Deployment on beast, the same mechanism as the fpl API:
 
 Safeguards before sharing:
 
-- **Cloudflare Access** (email one-time PIN, allowlist of the interviewers and Tony): the assessment data is not
-  for publication.
+- **Cloudflare Access** (email one-time PIN, allowlist of the interviewers and Tony): the assessment data is kept
+  private as a precaution (the brief doesn't say it's confidential), and access limits who can spend on the API key.
 - A separate Anthropic workspace/key with its own spend limit, and a per-session message cap.
 - Stored example outputs, so the app is useful even if the key is off or the limit is hit.
 

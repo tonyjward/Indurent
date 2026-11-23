@@ -222,7 +222,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Assessment materials (not for publication). data/geo/ holds public-domain boundary data and is tracked.
+# Assessment materials, kept out of the repo as a precaution (the brief doesn't say they're confidential).
+# data/geo/ holds public-domain boundary data and is tracked.
 data/*
 !data/geo/
 docs/
