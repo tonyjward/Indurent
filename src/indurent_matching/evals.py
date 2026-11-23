@@ -16,6 +16,7 @@ report. The tests run these functions with a scripted model and judge, so they c
 """
 
 import json
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 from indurent_matching import chat
-from indurent_matching.graph import build_graph, make_tools
+from indurent_matching.graph import SYSTEM_PROMPT, build_graph, make_tools
 
 # --- Cases ---------------------------------------------------------------------------------------------------------
 
@@ -124,11 +125,18 @@ def _decimals(number: str) -> int:
     return len(number.split(".")[1]) if "." in number else 0
 
 
+def _rounds_or_cuts_to(source: float, value: float, decimals: int) -> bool:
+    """True if `source` rounded, or cut down, to `decimals` places gives `value`."""
+    scale = 10**decimals
+    return round(source, decimals) == value or math.floor(source * scale) / scale == value
+
+
 def unsupported_numbers(answer: str, sources: list[str]) -> list[str]:
     """Numbers in the answer that don't appear in any source (the tool results and the questions).
 
-    A number counts as supported if a source has it, or has a value that rounds to it at the answer's precision
-    (the answer may give 0.73 for a tool's 0.734). Row numbers in tables and numbered lists are skipped.
+    A number counts as supported if a source has it, or has a value that rounds or cuts down to it at the
+    answer's precision (0.73 for a tool's 0.734; "51 miles or more" for 51.5). Row numbers in tables and numbered
+    lists are skipped.
     """
     known = []
     for source in sources:
@@ -136,7 +144,7 @@ def unsupported_numbers(answer: str, sources: list[str]) -> list[str]:
     unsupported = []
     for number in numbers_in(ROW_NUMBER.sub("|", answer)):
         value, decimals = _value(number), _decimals(number)
-        if not any(round(source, decimals) == value for source in known):
+        if not any(_rounds_or_cuts_to(source, value, decimals) for source in known):
             unsupported.append(number)
     return sorted(set(unsupported), key=unsupported.index)
 
@@ -145,16 +153,19 @@ def unsupported_numbers(answer: str, sources: list[str]) -> list[str]:
 
 JUDGE_PROMPT = """You check answers written by an analyst agent for a property company. The agent answers \
 questions about newly marketed warehouse listings and the company's portfolio of units, using tools. The tool \
-results are its only source of facts about the data; the tool descriptions say how its scores are calculated.
+results are its only source of facts about the data; the tool descriptions say how its scores are calculated, \
+and its instructions (system prompt) give rules it must follow, such as warnings to give. Statements that come \
+from the instructions or tool descriptions are supported.
 
-You get the tool descriptions, the user's question(s), the tool results, the agent's answer, and what a good \
-answer does for this case. Report:
+You get the agent's instructions, the tool descriptions, the user's question(s), the tool results, the agent's \
+answer, and what a good answer does for this case. Report:
 
 1. unsupported_claims: statements in the answer about the data that the tool results don't support. Include \
 invented numbers, units, estates, relationships between units (e.g. saying two units are neighbours when nothing \
 says so), and wrong explanations of why a unit ranks where it does. Quote or closely paraphrase each one. Don't \
 include: descriptions of the method that agree with the tool descriptions, offers to do more, restating the \
-question, or rounding of numbers that are in the results.
+question, or rounding of numbers that are in the results. List only the claims you flag: don't list claims you \
+checked and found supported.
 2. missing_caveats: limits or warnings in the tool results that the answer should pass on but doesn't (e.g. a \
 listing can't be compared on location, units left out because their value is unknown). Leave empty if none.
 3. behaviour_ok: whether the answer does what the case expects. behaviour_note: one sentence on why."""
@@ -169,9 +180,12 @@ class Verdict(BaseModel):
     behaviour_note: str = Field(description="One sentence on why.")
 
 
-def judge_messages(case: Case, tool_descriptions: list[str], tool_results: list[str], answer: str) -> list:
-    """The messages the judge is sent for one answer."""
+def judge_messages(
+    case: Case, instructions: str, tool_descriptions: list[str], tool_results: list[str], answer: str
+) -> list:
+    """The messages the judge is sent for one answer. `instructions` is the agent's system prompt."""
     sections = [
+        "## The agent's instructions\n\n" + instructions,
         "## Tool descriptions\n\n" + "\n\n".join(tool_descriptions),
         "## Question(s)\n\n" + "\n\n".join(case.questions),
         "## Tool results\n\n" + "\n\n".join(tool_results),
@@ -266,7 +280,7 @@ def run_case(case: Case, data, model, judge: Callable) -> dict:
     trajectory = check_trajectory(calls, case.expect, case.forbid)
     numbers = unsupported_numbers(answer, tool_results + case.questions)
     descriptions = [f"{t.name}: {t.description}" for t in make_tools(data)]
-    verdict, judge_tokens = judge(judge_messages(case, descriptions, tool_results, answer))
+    verdict, judge_tokens = judge(judge_messages(case, SYSTEM_PROMPT, descriptions, tool_results, answer))
     judge_ok = not verdict.unsupported_claims and verdict.behaviour_ok
 
     return {

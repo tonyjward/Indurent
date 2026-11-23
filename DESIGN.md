@@ -188,13 +188,57 @@ START -> agent <-> tools -> END
 |---|---|---|
 | Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
 | Graph | scripted chat model replays chosen tool calls: the filter flows from `filter_rows` into the search tools only with `use_filter`, `refine` and `reset_filters` work, tool errors come back as messages | free, deterministic |
-| Tool-call evals | real model, `@pytest.mark.llm` (skipped by default): each case = prompt + expected calls and arguments | paid, run on request |
+| App | Streamlit AppTest of the real page with the scripted model: prompt buttons, streaming, the tool-call panel, New chat, errors shown in the chat | free, deterministic |
+| Evals | the real agent (Claude) on 12 cases, checked by code and by an LLM judge (`evals/`) | paid, run on request |
 
-Eval cases: the three brief prompts and rewordings; direction traps ("more than 10 miles" -> `<= 10`); ambiguity
-("the marketed property" with five listings -> ask or run all five, never pick silently); defaults (k = 10, no
-estate cap unless the user asks for a spread).
-Arguments are compared field by field; each case runs several times and reports a pass rate, since model output
-varies.
+### Evals
+
+`uv run python evals/run_evals.py` runs each case in a fresh conversation and applies three checks, cheapest first:
+
+1. **Trajectory (code):** the tool calls each case expects, in order, with the arguments that matter (other calls
+   in between are fine), and any tools it mustn't use.
+2. **Numbers (code):** every number in the answer must appear in a tool result or the question. This catches
+   invented scores, distances, counts and Property Ids, and is the check a production validation step would run.
+3. **Judge (Claude, low effort, structured output):** reads the tool results and the answer, and lists claims the
+   results don't support, caveats the answer leaves out, and whether it behaved as the case expects.
+
+The 12 cases: the brief's three prompts word for word; variations (a named listing, a listing with size only,
+nearest by estate name, location weighted double, a two-turn refine, including unknowns when asked, an EPC filter
+that must carry the reliability warning); and two out-of-scope questions (a rent figure, a guess at a missing
+build year), which it must decline. Each run's results and report are saved in a dated folder under
+`data/evals/` (gitignored: the answers contain portfolio data). `--repeats 3` gives pass rates, since answers vary.
+
+### What the first run found (2026-11-23)
+
+6 of 12 cases passed every check; the run cost $1.01. The trajectory was right on every case: the right tools,
+with the right arguments, including refine and include-unknown. The code checks found almost nothing. The judge
+found the real problems.
+
+**Claude filling gaps between tool facts.** It rarely invented anything outright. Instead it added one small,
+plausible step of its own on top of what the tools said, and the step was often true, but nothing in the tool
+results supported it:
+
+| Case | The tools said | Claude said | Fix: make the tool say it |
+|---|---|---|---|
+| Guess M2's build year | M2 has no coordinates; the estate it sits on is blank | "M2 isn't on any estate Indurent owns" (unknown, not no) | "Unknown (no coordinates)" instead of blank |
+| Include unknowns | 358 units have no city distance; 358 have no location | "Those are the same 358 units" (true, but unstated) | Say the distance is unknown *because* the location is |
+| Prompt 2 | M4's size score is 0.17 (atypical) | "M4 is unusually small" (the score gives no direction) | Say whether the listing is smaller/larger, older/newer than typical |
+| Nearest to M3 | The 10 nearest units, all 0.0 miles away | "There may be more units at 0.0 miles" (unstated) | Report ties, as `find_similar` already does for size |
+
+The lesson: a rule in the prompt ("only say what the tools say") isn't enough on its own. The fix is to close
+the gaps in the tools, so there's nothing left to infer. These gaps are also why the number check alone isn't
+enough: every number in these answers was real.
+
+**Problems with the eval itself**, fixed before the rerun:
+
+- The EPC case expected ratings A, B and C exactly; Claude also included A+ (a real rating, absent from this
+  data). The check now accepts it.
+- The judge didn't see the system prompt, so it flagged the EPC warning the prompt tells Claude to give. It now
+  gets the system prompt as a source.
+- The judge listed claims it had checked and then accepted ("…so not flagged"). It's now told to list only the
+  claims it flags.
+- "51 miles or more" for a unit 51.5 miles away was flagged, because 51.5 rounds to 52. A number cut down to the
+  precision written (rather than rounded) now counts too.
 
 ## 6. Streamlit app and deployment
 

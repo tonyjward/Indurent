@@ -19,6 +19,7 @@ import pandas as pd
 
 from indurent_matching.similarity import (
     BLOCKS,
+    has_usable_location,
     homogeneity_scores,
     miles_to_units,
     most_similar,
@@ -154,6 +155,20 @@ def list_listings(data: Data) -> dict:
     return {"summary": summary, "listings": listings}
 
 
+def _estate_status(row: pd.Series, portfolio: pd.DataFrame) -> str:
+    """The portfolio estate a listing sits on, in words that can't be misread.
+
+    A blank (null) would mean two things: the listing isn't on an Indurent estate, or it has no usable location
+    so nobody can tell. The model read the second as the first in an eval, so each case is spelled out.
+    """
+    if not has_usable_location(row):
+        return f"unknown: {row['listing_id']} has no usable location"
+    estate = sits_on_estate(row, portfolio)
+    if estate is None:
+        return "none: it isn't on an estate Indurent owns"
+    return estate
+
+
 def get_listing(data: Data, listing: str) -> dict:
     """One marketed listing's facts and data-quality notes, found by id ("M3") or name ("Spitfire Park").
 
@@ -167,14 +182,14 @@ def get_listing(data: Data, listing: str) -> dict:
 
     Returns:
         `summary`, the listing's facts, `matched_on` and `not_available`, `sits_on_estate` (the portfolio
-        estate it sits on, or null) and `quality_notes`.
+        estate it sits on, "none: ..." or "unknown: ..." when it has no usable location) and `quality_notes`.
 
     Raises:
         ToolError: no listing matches, or more than one does. The message lists the options.
     """
     row = _resolve_listing(data, listing)
     facts = _listing_facts(row)
-    facts["sits_on_estate"] = sits_on_estate(row, data.portfolio)
+    facts["sits_on_estate"] = _estate_status(row, data.portfolio)
     facts["quality_notes"] = list(row["quality_notes"])
     return {"summary": f"{facts['listing_id']}: {facts['estate']}, {facts['unit']}", **facts}
 
@@ -192,6 +207,16 @@ FILTER_FIELDS = {
     "epc_rating": "text",  # A-G; unreliable in this data (EDA 2.9), so answers should say so
     "estate_units": "number",  # units in the unit's estate
     "car_parking_spaces": "number",  # an estate-level figure
+}
+# Why a field's value can be unknown, so the summary says it and the model doesn't have to work it out.
+UNKNOWN_BECAUSE = {
+    "miles_to_city": "miles_to_city is unknown where a unit has no usable location",
+    "nearest_city": "nearest_city is unknown where a unit has no usable location",
+    "derived_region": "derived_region is unknown where a unit has no usable location",
+    "size_sqft": "size_sqft is unknown where none is recorded or it's doubtful",
+    "build_year": "build_year is unknown where none is recorded",
+    "epc_rating": "epc_rating is unknown where none is recorded",
+    "car_parking_spaces": "car_parking_spaces is unknown where none is recorded",
 }
 OPERATORS = {"number": {"<=", ">=", "<", ">", "==", "in", "between"}, "text": {"==", "in"}}
 
@@ -300,6 +325,9 @@ def filter_rows(data: Data, conditions: list[dict], include_unknown: bool, candi
         f"{int(unknown.sum()):,} had no usable value for {', '.join(fields)} and were "
         f"{'kept' if include_unknown else 'excluded'}."
     )
+    reasons = [UNKNOWN_BECAUSE[field] for field in fields if field in UNKNOWN_BECAUSE]
+    if unknown.any() and reasons:
+        summary += f" ({'; '.join(reasons)}.)"
     return {
         "summary": summary,
         "candidates": [int(i) for i in kept],
@@ -465,12 +493,43 @@ HOMOGENEITY_MEANING = (
 )
 
 
+def _percent(share: float) -> float:
+    return round(100 * float(share), 1)
+
+
+def _position(row: pd.Series, portfolio: pd.DataFrame, blocks: list[str]) -> dict:
+    """Where the listing's build year and size sit in the portfolio: the share of units older/newer, smaller/larger.
+
+    A homogeneity score says how atypical a listing is, not which way (a low age score could mean old or new), so
+    this gives the direction. Only for the blocks the listing can be compared on.
+    """
+    position = {}
+    if "age" in blocks:
+        years = usable(portfolio, "build_year").dropna()
+        year = row["build_year"]
+        position["age"] = {
+            "build_year": _value(year, 0),
+            "pct_of_units_older": _percent((years < year).mean()),
+            "pct_of_units_newer": _percent((years > year).mean()),
+        }
+    if "physical" in blocks:
+        sizes = usable(portfolio, "size_sqft").dropna()
+        size = row["size_sqft"]
+        position["physical"] = {
+            "size_sqft": _value(size, 0),
+            "pct_of_units_smaller": _percent((sizes < size).mean()),
+            "pct_of_units_larger": _percent((sizes > size).mean()),
+        }
+    return position
+
+
 def get_homogeneity_scores(data: Data, listing: str) -> dict:
     """How typical a marketed listing is of the portfolio, scored separately on age, location and physical (prompt 2).
 
     Each score is 0-1, where 1 is the most typical value in the portfolio; null means not available, with the reason
-    in `not_available`. `location_context` and `size_context` explain the scores and aren't scored. State the
-    interpretation (`meaning`) in the answer.
+    in `not_available`. A low score says the listing is atypical, not which way: `position` gives the direction
+    (the share of portfolio units older/newer and smaller/larger than the listing). `location_context` and
+    `size_context` explain the scores and aren't scored. State the interpretation (`meaning`) in the answer.
 
     Args:
         data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
@@ -479,8 +538,8 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
 
     Returns:
         `summary`; `meaning` (the interpretation to state); `scores` for `age`, `location` and
-        `physical` (0-1, or null when not available); `not_available` (the reasons); `location_context`;
-        `size_context`; and `listing` (its facts).
+        `physical` (0-1, or null when not available); `not_available` (the reasons); `position`;
+        `location_context`; `size_context`; and `listing` (its facts).
 
     Raises:
         ToolError: no listing matches, or more than one does.
@@ -488,12 +547,15 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
     row = _resolve_listing(data, listing)
     result = homogeneity_scores(row, data.portfolio)
     blocks = _matched_on(row)
+    location_context = {key: _value(v, 1) for key, v in result["location_context"].items()}
+    location_context["sits_on_estate"] = _estate_status(row, data.portfolio)  # never a blank that reads as "no"
     return {
         "summary": f"Homogeneity scores for {row['listing_id']} ({row['industrial_estate_name']}, {row['unit_name']})",
         "meaning": HOMOGENEITY_MEANING,
         "scores": {block: _value(result[block], 2) for block in BLOCKS},
         "not_available": blocks["not_available"],
-        "location_context": {key: _value(v, 1) for key, v in result["location_context"].items()},
+        "position": _position(row, data.portfolio, blocks["matched_on"]),
+        "location_context": location_context,
         "size_context": {key: _value(v, 1) for key, v in result["size_context"].items()},
         "listing": _listing_facts(row),
     }
@@ -573,6 +635,16 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
         caveats.append(
             f"{unplaced:,} of the {len(pool):,} units searched have no usable location, so couldn't be ranked."
         )
+
+    # The last unit listed is as near as units left out, so the list is one of several equally near ones.
+    if len(matches) == k and len(placed) > k:
+        last = round(float(placed.iloc[k - 1]), 1)
+        as_near = int((placed.round(1) <= last).sum())
+        if as_near > k:
+            caveats.append(
+                f"{as_near} units are {last} miles or nearer, so these {k} aren't the only ones that near "
+                "(ties are listed in Property Id order)."
+            )
 
     # The listing sits on an estate Indurent owns: say so, and how many of the nearest are on it.
     estate = sits_on_estate(row, data.portfolio)

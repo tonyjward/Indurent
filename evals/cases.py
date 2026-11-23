@@ -25,10 +25,12 @@ def large_units(conditions) -> bool:
 
 
 def epc_c_or_better(conditions) -> bool:
-    """True if the conditions keep EPC ratings A to C."""
-    return any(
-        c["field"] == "epc_rating" and c["op"] == "in" and set(c["value"]) == {"A", "B", "C"} for c in conditions
-    )
+    """True if the conditions keep EPC ratings A to C (A+ may be included too: a real rating, absent from this data)."""
+    for c in conditions:
+        is_epc_list = c["field"] == "epc_rating" and c["op"] == "in"
+        if is_epc_list and {"A", "B", "C"} <= set(c["value"]) <= {"A+", "A", "B", "C"}:
+            return True
+    return False
 
 
 def location_doubled(weights) -> bool:

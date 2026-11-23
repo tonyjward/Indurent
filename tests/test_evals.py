@@ -71,6 +71,9 @@ def test_numbers_must_come_from_the_sources():
     sources = ['{"overall": 0.734, "size_sqft": 17340, "miles_from_listing": 4.5}', "Find the 10 nearest"]
     answer = "Property Id 586 scores 0.73 (17,340 sq ft, 4.5 miles away). Top 10 for M3. About 12 miles."
     assert unsupported_numbers(answer, sources) == ["586", "12"]  # 0.73 rounds from 0.734; M3 isn't a number
+    assert unsupported_numbers("51 miles or more", ["51.5"]) == []  # cut down to the precision written
+    assert unsupported_numbers("52 miles", ["51.5"]) == []  # rounded
+    assert unsupported_numbers("50 miles", ["51.5"]) == ["50"]
 
 
 def test_row_numbers_in_tables_and_lists_are_skipped():
@@ -83,9 +86,18 @@ def test_row_numbers_in_tables_and_lists_are_skipped():
 
 def test_judge_messages_hold_every_section():
     case = case_named("scope_rent")
-    system, human = judge_messages(case, ["find_similar: ..."], ['{"summary": "x"}'], "I can't price rent.")
-    assert "unsupported_claims" in system.content
-    for section in ["Tool descriptions", "Question(s)", "Tool results", "The agent's answer", "What a good answer"]:
+    system, human = judge_messages(
+        case, "Rules: ...", ["find_similar: ..."], ['{"summary": "x"}'], "I can't price rent."
+    )
+    assert "unsupported_claims" in system.content and "List only the claims you flag" in system.content
+    for section in [
+        "The agent's instructions",
+        "Tool descriptions",
+        "Question(s)",
+        "Tool results",
+        "The agent's answer",
+        "What a good answer",
+    ]:
         assert f"## {section}" in human.content
     assert case.behaviour in human.content
 
@@ -171,6 +183,13 @@ def test_cases_have_unique_names_and_a_behaviour():
             "epc_filter",
             [
                 tool("filter_rows", conditions=[{"field": "epc_rating", "op": "in", "value": ["C", "B", "A"]}]),
+                tool("find_similar", listing="M3", use_filter=True),
+            ],
+        ),
+        (
+            "epc_filter",
+            [
+                tool("filter_rows", conditions=[{"field": "epc_rating", "op": "in", "value": ["A+", "A", "B", "C"]}]),
                 tool("find_similar", listing="M3", use_filter=True),
             ],
         ),

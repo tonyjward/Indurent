@@ -48,6 +48,7 @@ def test_filter_unknowns_are_an_explicit_choice():
     assert dropped["candidates"] == [11, 12] and dropped["unknown"] == 1
     assert kept["candidates"] == [11, 12, 14]
     assert "1 had no usable value for miles_to_city and were excluded" in dropped["summary"]
+    assert "(miles_to_city is unknown where a unit has no usable location.)" in dropped["summary"]  # says why
 
 
 def test_filter_doubtful_values_count_as_unknown():
@@ -104,6 +105,11 @@ def test_get_listing_by_id_or_name(data, query):
     out = get_listing(data, query)
     assert out["listing_id"] == "M3" and out["sits_on_estate"] == "Velvet Park 60"
     assert out["build_year"] == 1976 and isinstance(out["build_year"], int)
+
+
+def test_get_listing_says_when_the_estate_is_unknown(data):
+    # M2 has no coordinates: which estate it's on is unknown, which a blank would hide (eval 2026-11-23).
+    assert get_listing(data, "M2")["sits_on_estate"] == "unknown: M2 has no usable location"
 
 
 def test_get_listing_unknown_or_ambiguous(data):
@@ -176,6 +182,8 @@ def test_find_nearest_whole_portfolio_and_unplaceable_listings(data):
     out = find_nearest(data, "M3")
     assert {m["estate"] for m in out["matches"]} == {"Velvet Park 60"}  # the estate it sits on
     assert any("358 of the 1,250 units" in c for c in out["caveats"])  # unknown locations can't be ranked
+    # Velvet Park 60 has more units at 0.0 miles than the 10 listed: say so (eval 2026-11-23).
+    assert "25 units are 0.0 miles or nearer, so these 10 aren't the only ones that near" in " ".join(out["caveats"])
     for listing, reason in [("M2", "no coordinates"), ("M5", "offshore")]:
         with pytest.raises(ToolError, match=reason):
             find_nearest(data, listing)
@@ -188,3 +196,9 @@ def test_get_homogeneity_scores_prompt_2(data):
     assert "how typical" in m3["meaning"]
     m5 = get_homogeneity_scores(data, "M5")
     assert m5["scores"]["location"] is None and "offshore" in m5["not_available"]["location"]
+    assert m5["location_context"]["sits_on_estate"] == "unknown: M5 has no usable location"
+    # The direction a score can't give (eval 2026-11-23): M5 is older than almost every unit, M4 smaller.
+    assert m5["position"]["age"] == {"build_year": 1966, "pct_of_units_older": 2.0, "pct_of_units_newer": 97.3}
+    m4 = get_homogeneity_scores(data, "M4")["position"]["physical"]
+    assert m4 == {"size_sqft": 617, "pct_of_units_smaller": 1.3, "pct_of_units_larger": 98.7}
+    assert list(get_homogeneity_scores(data, "M2")["position"]) == ["physical"]  # no build year, so no age

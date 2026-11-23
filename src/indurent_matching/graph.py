@@ -222,6 +222,9 @@ def make_tools(data: T.Data) -> list:
     def get_homogeneity_scores(listing: str) -> str:
         """How typical a listing is of the portfolio, scored separately on age, location and physical. Prompt 2.
 
+        A low score says the listing is atypical, not which way: use `position` for that (e.g. older or smaller
+        than most units).
+
         Args:
             listing: the listing's id ("M3") or name.
         """
