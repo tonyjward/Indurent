@@ -13,9 +13,14 @@ from scripted import Scripted, call
 from indurent_matching.evals import (
     Call,
     Case,
+    Mentions,
+    NoFigures,
+    Ranking,
+    Scores,
     Verdict,
     check_trajectory,
     judge_messages,
+    listed_units,
     report_markdown,
     run_case,
     unsupported_numbers,
@@ -114,10 +119,14 @@ def test_run_case_passes_a_good_answer(data):
         replies=[
             call("filter_rows", conditions=WITHIN_10, include_unknown=False, refine=False),
             call("find_nearest", listing="M3", use_filter=True, k=3),
-            AIMessage("Nearest within 10 miles of a city: Property Ids 170, 169 and 167."),
+            AIMessage(
+                "50 units are within 10 miles of a city; 358 with no usable location were left out.\n\n"
+                "| Property Id | Miles from M3 |\n|---|---|\n| 170 | 9.1 |\n| 169 | 9.1 |\n| 167 | 9.1 |"
+            ),
         ]
     )
     result = run_case(case_named("brief_3_closest_near_city"), data, model, good_verdict)
+    assert result["correct"]["passed"]
     assert result["trajectory"]["passed"] and result["numbers"]["passed"] and result["judge"]["passed"]
     assert result["passed"] and [c["name"] for c in result["tool_calls"]] == ["filter_rows", "find_nearest"]
     assert result["cost_usd"] == pytest.approx((1000 * 4 + 100 * 20) / 1e6)  # the scripted agent reports no usage
@@ -211,3 +220,69 @@ def test_weighted_case_rejects_the_wrong_weights():
     case = case_named("weighted_location")
     calls = [tool("find_similar", listing="M1", k=5, weights={"age": 2})]
     assert check_trajectory(calls, case.expect, case.forbid) != []
+
+
+# --- The right answer -----------------------------------------------------------------------------------------------
+
+NEAREST_M3_FILTERED = Ranking(
+    "M3", "find_nearest", filters=[([{"field": "miles_to_city", "op": "<=", "value": 10}], False)]
+)
+
+
+def nearest_table(rows):
+    """A Markdown table of (Property Id, miles) rows, as an answer would show them."""
+    lines = ["| Property Id | Estate | Miles from M3 |", "|---|---|---|"]
+    lines += [f"| {property_id} | Somewhere | {miles} |" for property_id, miles in rows]
+    return "\n".join(lines)
+
+
+def test_listed_units_reads_tables_lists_and_written_out_lists():
+    answer = "\n".join(
+        [
+            "Property Id 999 stands out.",  # prose: not part of the list
+            nearest_table([(170, 9.1), (169, 9.1)]),
+            "",
+            "1. Property Id 167, 9.1 miles",
+            "Property Ids 602 (905 sq ft, 1.0), 689 (905, 0.999) and 221 (905, 0.999).",
+        ]
+    )
+    assert [property_id for property_id, _ in listed_units(answer)] == [170, 169, 167, 602, 689, 221]
+
+
+def test_ranking_passes_the_right_answer(data):
+    reference = NEAREST_M3_FILTERED.reference(data)
+    assert [property_id for property_id, _ in reference[:3]] == [170, 169, 167]  # Jade Bridge 6, 9.1 miles
+    assert NEAREST_M3_FILTERED.check(nearest_table(reference[:5]), data) == []
+
+
+def test_ranking_catches_a_dropped_unit_a_wrong_order_and_a_swapped_value(data):
+    reference = NEAREST_M3_FILTERED.reference(data)[:5]
+    dropped = reference[:1] + reference[2:]
+    assert "expected the top 3" in NEAREST_M3_FILTERED.check(nearest_table(dropped), data)[0]
+    swapped = [reference[1], reference[0], *reference[2:]]
+    assert NEAREST_M3_FILTERED.check(nearest_table(swapped), data) != []
+    wrong_value = [(reference[0][0], 51.5), *reference[1:]]
+    assert NEAREST_M3_FILTERED.check(nearest_table(wrong_value), data) == [
+        f"M3: Property Id {reference[0][0]}'s row doesn't show its miles from the listing ({reference[0][1]})"
+    ]
+
+
+def test_ranking_accepts_a_shared_value_stated_once_and_an_optional_listing_left_out(data):
+    nearest = Ranking("M3", "find_nearest")
+    reference = nearest.reference(data)[:3]  # all 0.0 miles: M3 sits on Velvet Park 60
+    table = "All 0.0 miles away.\n\n| Property Id | Unit |\n|---|---|\n" + "\n".join(
+        f"| {property_id} | Unit |" for property_id, _ in reference
+    )
+    assert nearest.check(table, data) == []
+    assert Ranking("M1", "find_similar", required=False).check("Which listing do you mean?", data) == []
+    assert Ranking("M1", "find_similar").check("Which listing do you mean?", data) != []
+
+
+def test_scores_mentions_and_no_figures(data):
+    assert Scores("M3").check("| M3 Spitfire Park | 0.86 | 0.62 | 0.87 |", data) == []
+    assert Scores("M3").check("| M3 Spitfire Park | 0.86 | 0.73 | 0.87 |", data) != []  # M4's location score
+    assert Mentions([50, 358], "x").check("Kept 50; 358 left out as unknown.", data) == []
+    assert Mentions([50, 358], "x").check("Kept 50.", data) == ["doesn't state 358 (x)"]
+    rent = NoFigures(r"£\s?\d[\d,.]*|\d[\d,.]*\s*(?:per|/)\s*sq\.?\s?ft", "a rent figure")
+    assert rent.check("I can't suggest a rent: the data has none.", data) == []
+    assert rent.check("Offer about £8.50 per sq ft.", data) != []

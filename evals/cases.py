@@ -5,9 +5,13 @@ Each case says which tool calls it expects (in order), which tools it mustn't us
 """
 
 from indurent_matching.chat import BRIEF_PROMPTS
-from indurent_matching.evals import Call, Case
+from indurent_matching.evals import Call, Case, Mentions, NoFigures, Ranking, Scores
 
 WITHIN_10_MILES = [{"field": "miles_to_city", "op": "<=", "value": 10}]
+AT_LEAST_10000_SQFT = [{"field": "size_sqft", "op": ">=", "value": 10000}]
+EPC_A_TO_C = [{"field": "epc_rating", "op": "in", "value": ["A", "B", "C"]}]
+LISTINGS = ["M1", "M2", "M3", "M4", "M5"]
+LOCATED = ["M1", "M3", "M4"]  # the listings with a usable location (M2 has no coordinates, M5's are offshore)
 
 
 def names(*accepted):
@@ -50,6 +54,8 @@ CASES = [
         forbid=["find_nearest", "filter_rows"],
         behaviour="The request doesn't say which of the five listings it means. A good answer either asks which "
         "listing, or gives the most similar units for every listing; it never picks one listing silently.",
+        # If it answers rather than asking, each listing it answers for must have its true top 10, in order.
+        answer_checks=[Ranking(listing, "find_similar", at_least=10, required=False) for listing in LISTINGS],
     ),
     Case(
         name="brief_2_homogeneity",
@@ -58,6 +64,7 @@ CASES = [
         forbid=["filter_rows"],
         behaviour="Gives homogeneity scores for each listing (or asks which), with physical, location and age "
         "scored separately, and says how 'correlation score for homogeneity' was interpreted.",
+        answer_checks=[Scores(listing) for listing in LISTINGS],
     ),
     Case(
         name="brief_3_closest_near_city",
@@ -70,6 +77,13 @@ CASES = [
         behaviour="Gives the nearest units on the map within 10 miles of a major city (for each listing that can "
         "be located, or asks which). Says how many units were left out because their location is unknown, and "
         "offers to include them.",
+        answer_checks=[
+            *[
+                Ranking(listing, "find_nearest", filters=[(WITHIN_10_MILES, False)], required=False)
+                for listing in LOCATED
+            ],
+            Mentions([50, 358], "units kept by the filter, and left out as unknown"),
+        ],
     ),
     # --- Variations ---
     Case(
@@ -79,6 +93,7 @@ CASES = [
         forbid=["find_nearest"],
         behaviour="Lists 10 units most similar to M3, says M3 sits on an estate Indurent already owns, and that "
         "age, location and size were weighted equally.",
+        answer_checks=[Ranking("M3", "find_similar", at_least=10)],
     ),
     Case(
         name="similar_size_only",
@@ -87,6 +102,7 @@ CASES = [
         forbid=["find_nearest"],
         behaviour="Says M2 can only be compared on size (no build year or coordinates), and that many units score "
         "about the same, so the list is one of several equally good ones.",
+        answer_checks=[Ranking("M2", "find_similar")],
     ),
     Case(
         name="nearest_by_name",
@@ -94,6 +110,7 @@ CASES = [
         expect=[Call("find_nearest", {"listing": names("M3", "Spitfire"), "use_filter": False})],
         forbid=["find_similar"],
         behaviour="Lists the portfolio units nearest to the Spitfire Park listing (M3) on the map, with distances.",
+        answer_checks=[Ranking("M3", "find_nearest")],
     ),
     Case(
         name="weighted_location",
@@ -102,6 +119,7 @@ CASES = [
         forbid=["find_nearest"],
         behaviour="Lists 5 units most similar to M1 with location weighted double, and says the weights were "
         "changed from equal as asked.",
+        answer_checks=[Ranking("M1", "find_similar", weights={"location": 2}, at_least=5)],
     ),
     Case(
         name="refine_filter",
@@ -117,6 +135,10 @@ CASES = [
         forbid=[],
         behaviour="Narrows the earlier filter to units of 10,000 sq ft or more (keeping the 10-mile condition) and "
         "lists the nearest of those to M3, saying how many units the filter kept.",
+        answer_checks=[
+            Ranking("M3", "find_nearest", filters=[(WITHIN_10_MILES, False), (AT_LEAST_10000_SQFT, False)]),
+            Mentions([17], "units the refined filter kept"),
+        ],
     ),
     Case(
         name="include_unknown_when_asked",
@@ -133,6 +155,10 @@ CASES = [
         forbid=[],
         behaviour="Keeps units with an unknown distance as asked, says how many of those there are, and lists "
         "the nearest units to M3 from the filtered set.",
+        answer_checks=[
+            Ranking("M3", "find_nearest", filters=[(WITHIN_10_MILES, True)]),
+            Mentions([358], "units kept because their distance is unknown"),
+        ],
     ),
     Case(
         name="epc_filter",
@@ -144,6 +170,7 @@ CASES = [
         forbid=[],
         behaviour="Filters to EPC A-C and lists the most similar units, and warns that the portfolio's EPC ratings "
         "look unreliable, so the result should be treated with caution.",
+        answer_checks=[Ranking("M3", "find_similar", filters=[(EPC_A_TO_C, False)])],
     ),
     # --- Out of scope: the data can't answer these ---
     Case(
@@ -153,6 +180,7 @@ CASES = [
         forbid=[],
         behaviour="Says the data has no rents or prices, so it can't suggest a figure, and gives no rent figure. "
         "It may offer what it can do instead (e.g. similar units).",
+        answer_checks=[NoFigures(r"£\s?\d[\d,.]*|\d[\d,.]*\s*(?:per|/)\s*sq\.?\s?ft", "a rent figure")],
     ),
     Case(
         name="scope_guess_missing_value",
@@ -161,5 +189,6 @@ CASES = [
         forbid=[],
         behaviour="Doesn't estimate or guess a build year: says it isn't recorded, so M2 can't be compared on age. "
         "No year is suggested for M2.",
+        answer_checks=[NoFigures(r"\b(?:18|19|20)\d\d\b", "a year, which could only be a guess")],
     ),
 ]

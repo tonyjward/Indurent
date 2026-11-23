@@ -68,7 +68,7 @@ def main() -> None:
         results.append(result)
         spent += result["cost_usd"]
         checks = []
-        for check in ["trajectory", "numbers", "judge"]:
+        for check in ["trajectory", "numbers", "judge", "correct"]:
             checks.append(f"{check} {'ok' if result[check]['passed'] else 'FAIL'}")
         print(f"{case.name} (run {repeat}): {', '.join(checks)}; ${result['cost_usd']:.3f} (total ${spent:.2f})")
         # Save after every run, so a stopped or failed eval keeps what it has.
