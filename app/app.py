@@ -19,7 +19,9 @@ from indurent_matching import tools as T
 from indurent_matching.data import load_marketed, load_portfolio
 from indurent_matching.graph import build_graph
 
-DATA_DIR = Path(os.environ.get("INDURENT_DATA_DIR", Path(__file__).resolve().parents[1] / "data"))
+HERE = Path(__file__).resolve().parent
+DATA_DIR = Path(os.environ.get("INDURENT_DATA_DIR", HERE.parent / "data"))
+LOGO = HERE / "assets" / "indurent_logo.png"
 
 # Button labels for the brief's prompts (the full prompt shows when you hover).
 PROMPT_LABELS = {
@@ -100,6 +102,7 @@ if "graph" not in state:
 config = chat.thread_config(state.thread_id)
 
 with st.sidebar:
+    st.image(str(LOGO), width=220)
     if st.button("New chat", width="stretch"):
         new_conversation()
         st.rerun()
