@@ -63,10 +63,12 @@ public `trycloudflare.com` address: `uv run langgraph dev --tunnel`.
 LangSmith only connects to domains on its list. Add the new `trycloudflare.com` domain under Advanced Settings in
 Studio's connection dialog.
 
-## Running the brief's prompts through the agent
+## Remaking the example conversations
 
-`uv run python scripts/run_brief_prompts.py` asks the agent the three prompts, word for word, and saves its answers
-and tool calls to `data/examples/` (gitignored; about $0.40, stops at a $2 cap).
+`uv run python scripts/run_examples.py` runs the example conversations in `scripts/run_examples.py` (the brief's
+three prompts and the extras) and saves each to `outputs/` as Markdown, with an index in `outputs/README.md`
+(about $1.50; stops at a $3 cap). Name examples to run only those:
+`uv run python scripts/run_examples.py refining_filters`.
 
 ## Deploying the app
 

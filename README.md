@@ -11,7 +11,9 @@ two spreadsheets ──> clean + quality flags ──> similarity functions ─�
 ```
 
 - [**The approach**](#the-approach): why not text embeddings, and what instead
-- [**Answers to the three prompts**](#answers-to-the-three-prompts)
+- [**How it maps to the brief**](#how-it-maps-to-the-brief)
+- [**Answers to the three prompts**](#answers-to-the-three-prompts), and
+  [**example conversations**](outputs/README.md) with the agent
 - [**What we found in the data**](#what-we-found-in-the-data)
 - [**How we know it works**](#how-we-know-it-works): tests, and evals of the agent
 - [**Production notes**](#production-notes)
@@ -44,7 +46,10 @@ left out and counted, not quietly matched.
    - **Homogeneity:** how typical the listing is of the whole portfolio (prompt 2).
    - **Pairwise similarity:** how similar the listing is to one portfolio unit (prompt 1).
 
-   Every choice is backed by evidence in the notebooks.
+   This is the **vectorisation of the structured data**: each unit becomes a vector of numbers (build year, the
+   log of its size, latitude and longitude), and each similarity metric is computed with numpy for the whole
+   portfolio at once, one array operation rather than a loop over units. Every choice is backed by evidence in the
+   notebooks.
 2. **Tools** (`tools.py`): plain Python that the model calls, such as `filter_rows`, `find_similar`, `find_nearest`
    and `get_homogeneity_scores`. Each returns a short summary, the rows that matter and the caveats to pass on;
    never the whole table. This is the *retrieval* in our RAG: exact retrieval over the portfolio, by filter and
@@ -59,12 +64,28 @@ left out and counted, not quietly matched.
    **faithfulness** (nothing the tools didn't say), **scope** (declining what the data can't answer) and the
    **right answer**.
 
+### How it maps to the brief
+
+| The brief's task | Where it's done |
+|---|---|
+| 1. Load and preprocess the datasets | `data.py` and `geo.py`: cleaning, quality flags and location checks, each rule backed by the EDA |
+| 2. Vectorise the relevant features | `similarity.py`: numeric feature vectors per unit, and similarity metrics computed across the portfolio with numpy |
+| 3. Apply RAG to enrich or contextualise the data | `tools.py`: retrieval over the portfolio (filter, rank, score), whose results ground every answer |
+| 4. Use prompt engineering to query an AI model | `graph.py`: Claude through the Anthropic API, in a LangGraph agent, with the system prompt's rules and the tools' descriptions |
+| 5. Return results based on user-defined prompts | `app/app.py` (a chat app) and [`outputs/`](outputs/README.md) (example conversations) |
+
+And the deliverables: the code is the package and [notebooks](#notebooks), with docstrings throughout; the output
+from testing the example prompts is in [`outputs/`](outputs/README.md); the production notes are
+[below](#production-notes).
+
 ## Answers to the three prompts
 
 There are five marketed listings (M1-M5). Two can't be compared on everything: **M2** has no build year or
 coordinates (size only), and **M5**'s coordinates are 27 km offshore (no location). Full results for every listing
-are in [`notebooks/03_answers`](notebooks/03_answers.ipynb), straight from the code; the agent gives the same answers
-in conversation (checked by the evals).
+are in [`notebooks/03_answers`](notebooks/03_answers.ipynb), straight from the code. The agent's own answers, asked
+each prompt word for word, are in [`outputs/`](outputs/README.md): [prompt 1](outputs/prompt_1_most_similar.md),
+[prompt 2](outputs/prompt_2_homogeneity.md) and [prompt 3](outputs/prompt_3_closest_near_city.md), with the tool
+calls behind each answer. The evals check that its answers match the code's.
 
 ### Prompt 1: "Find the 10 most similar properties in the estate to the newly marketed property."
 
@@ -196,6 +217,7 @@ $0.10-0.15.
 uv run streamlit run app/app.py                      # the chat app, at http://localhost:8501
 uv run python evals/run_evals.py                     # the evals once (about $1.20); --repeats 3 for pass rates
 uv run python evals/rescore.py data/evals/<run>      # re-check a saved run's answers (free)
+uv run python scripts/run_examples.py                # remake the example conversations in outputs/ (about $1.50)
 ```
 
 The app is also deployed, on a home server behind a Cloudflare Tunnel (the address isn't in the repo while it's
@@ -225,8 +247,9 @@ src/indurent_matching/   the package
 app/                     the Streamlit web app (app.py) and its logo
 evals/                   eval cases, the runner and the rescorer
 notebooks/               01 EDA, 02 similarity, 03 answers
+outputs/                 example conversations with the agent, one per file
 tests/                   pytest suite, no API calls (scripted.py is a fake chat model)
-scripts/                 the brief prompts run through the agent; the UK boundaries build
+scripts/                 the example conversations run; the UK boundaries build
 deploy/                  the systemd service that runs the app
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
 ```
