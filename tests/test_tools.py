@@ -93,6 +93,10 @@ def test_list_listings(data):
     assert [x["listing_id"] for x in out["listings"]] == ["M1", "M2", "M3", "M4", "M5"]
     m2 = out["listings"][1]
     assert m2["matched_on"] == ["physical"] and set(m2["not_available"]) == {"age", "location"}
+    assert out["summary"] == (
+        "5 marketed listings: M1, M2, M3, M4, M5. "
+        "2 can't be compared on every block: M2 (no age or location), M5 (no location)."
+    )
 
 
 @pytest.mark.parametrize("query", ["M3", "m3", "Spitfire Park", "spitfire park, unit 42", "Spitfire"])
@@ -128,7 +132,10 @@ def test_find_similar_prompt_1(data):
     out = find_similar(data, "M3")
     assert len(out["matches"]) == 10 and {m["estate"] for m in out["matches"]} == {"Velvet Park 60"}
     assert any("sits on Velvet Park 60" in c and "10 of the 10" in c for c in out["caveats"])
+    assert out["summary"].endswith("scored on age, location and physical (size), weighted equally")
+    assert find_similar(data, "M5")["summary"].endswith("scored on age and physical (size), weighted equally")
     m2 = find_similar(data, "M2")
+    assert m2["summary"].endswith("scored on physical (size) alone")
     assert any(c.startswith("Matched on physical only") for c in m2["caveats"])
     assert any("on size alone" in c for c in m2["caveats"])  # many units tie
     assert all(m["age"] is None and m["location"] is None for m in m2["matches"])
@@ -138,6 +145,8 @@ def test_find_similar_options(data):
     capped = find_similar(data, "M3", max_per_estate=2)
     assert max(pd.Series([m["estate"] for m in capped["matches"]]).value_counts()) == 2
     assert any("At most 2" in c for c in capped["caveats"])
+    weighted = find_similar(data, "M3", weights={"location": 2})
+    assert weighted["summary"].endswith("weighted as requested: {'location': 2}")
     with pytest.raises(ToolError, match="k must be"):
         find_similar(data, "M3", k=0)
     with pytest.raises(ToolError, match="unknown blocks"):

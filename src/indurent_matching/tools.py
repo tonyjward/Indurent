@@ -140,10 +140,18 @@ def list_listings(data: Data) -> dict:
         compared on) and `not_available` (the blocks it can't, with the reason).
     """
     listings = [_listing_facts(row) for _, row in data.marketed.iterrows()]
-    return {
-        "summary": f"{len(listings)} marketed listings: {', '.join(x['listing_id'] for x in listings)}",
-        "listings": listings,
-    }
+    summary = f"{len(listings)} marketed listings: {', '.join(x['listing_id'] for x in listings)}."
+
+    # Spell out how many can't be compared on every block, so the model quotes the count rather than working it out.
+    limited = []
+    for x in listings:
+        if x["not_available"]:
+            limited.append(f"{x['listing_id']} (no {' or '.join(x['not_available'])})")
+    if limited:
+        summary += f" {len(limited)} can't be compared on every block: {', '.join(limited)}."
+    else:
+        summary += " All can be compared on every block."
+    return {"summary": summary, "listings": listings}
 
 
 def get_listing(data: Data, listing: str) -> dict:
@@ -432,10 +440,17 @@ def find_similar(
     if max_per_estate is not None:
         caveats.append(f"At most {max_per_estate} unit(s) per estate, as requested.")
 
-    # 4. The result the model receives.
+    # 4. The result the model receives. The summary says how the scores were combined, so the answer can say it.
+    names = [{"physical": "physical (size)"}.get(block, block) for block in blocks["matched_on"]]
+    if len(names) == 1:
+        scored_on = f"scored on {names[0]} alone"
+    elif weights:
+        scored_on = f"scored on {', '.join(names[:-1])} and {names[-1]}, weighted as requested: {weights}"
+    else:
+        scored_on = f"scored on {', '.join(names[:-1])} and {names[-1]}, weighted equally"
     return {
         "summary": f"Top {len(matches)} matches for {row['listing_id']} ({row['industrial_estate_name']}, "
-        f"{row['unit_name']}) from {len(pool):,} units",
+        f"{row['unit_name']}) from {len(pool):,} units, {scored_on}",
         "listing": _listing_facts(row),
         "matches": matches,
         "caveats": caveats,

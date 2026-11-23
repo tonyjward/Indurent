@@ -14,6 +14,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from indurent_matching.chat import BRIEF_PROMPTS, RECURSION_LIMIT, text_of
 from indurent_matching.data import load_marketed, load_portfolio
 from indurent_matching.graph import MODEL, build_graph
 from indurent_matching.tools import Data
@@ -22,21 +23,6 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "examples"
 COST_CAP_USD = 2.00
 PRICE_PER_MTOK = {"input": 4.00, "output": 20.00}  # Claude Opus 5.5
-
-PROMPTS = {
-    "prompt_1": "Find the 10 most similar properties in the estate to the newly marketed property.",
-    "prompt_2": "Provide a correlation score for the homogeneity of the marketed property(ies) with the rest of the "
-    "estate, scoring each by physical characteristics, location, and age separately.",
-    "prompt_3": "Find the closest properties to the marketed property, after excluding any property in the portfolio "
-    "that is more than 10 miles from a major city.",
-}
-
-
-def text_of(message: AIMessage) -> str:
-    """The text of a model message (its content may be a string or a list of blocks)."""
-    if isinstance(message.content, str):
-        return message.content
-    return "".join(block.get("text", "") for block in message.content if isinstance(block, dict))
 
 
 def summarise(messages: list) -> dict:
@@ -53,7 +39,7 @@ def summarise(messages: list) -> dict:
     return {
         "tool_calls": calls,
         "tool_errors": errors,
-        "answer": text_of(messages[-1]),
+        "answer": text_of(messages[-1].content),
         "tokens": tokens,
         "cost_usd": round(cost, 4),
     }
@@ -67,11 +53,11 @@ def main() -> None:
     graph = build_graph(data)
     OUT.mkdir(parents=True, exist_ok=True)
     results, spent = {}, 0.0
-    for name, prompt in PROMPTS.items():
+    for name, prompt in BRIEF_PROMPTS.items():
         if spent >= COST_CAP_USD:
             print(f"Stopping before {name}: ${spent:.2f} spent, cap ${COST_CAP_USD:.2f}")
             break
-        out = graph.invoke({"messages": [HumanMessage(prompt)]}, {"recursion_limit": 40})
+        out = graph.invoke({"messages": [HumanMessage(prompt)]}, {"recursion_limit": RECURSION_LIMIT})
         results[name] = {"prompt": prompt, **summarise(out["messages"])}
         spent += results[name]["cost_usd"]
         print(

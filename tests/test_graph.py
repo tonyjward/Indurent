@@ -7,36 +7,11 @@ calls and the final answer, and LangGraph runs the real tools and checks in betw
 import json
 
 import pytest
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import Field
+from scripted import Scripted, call
 
 from indurent_matching.graph import build_graph
 from indurent_matching.tools import Data
-
-
-class Scripted(BaseChatModel):
-    """A fake chat model that replies with the next scripted message each time it's called."""
-
-    replies: list = Field(default_factory=list)
-    seen: list = Field(default_factory=list)
-
-    @property
-    def _llm_type(self):
-        return "scripted"
-
-    def bind_tools(self, tools, **kwargs):
-        return self
-
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        self.seen.append(list(messages))
-        return ChatResult(generations=[ChatGeneration(message=self.replies.pop(0))])
-
-
-def call(name, **args):
-    """A scripted tool call."""
-    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": f"call-{name}-{len(args)}"}])
 
 
 def run(data, *replies, question="A question"):
