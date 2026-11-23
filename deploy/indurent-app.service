@@ -1,0 +1,24 @@
+# The Indurent matching web app (app/app.py) on beast, bound to localhost:8503. The Cloudflare Tunnel publishes it
+# under its hostname (fpl uses 8501 and 8502). Install:
+#
+#   sudo cp deploy/indurent-app.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now indurent-app
+#   curl -s http://127.0.0.1:8503/_stcore/health     # "ok"
+#
+# Deploy a new version: `git push beast main` from the laptop, then `sudo systemctl restart indurent-app`.
+# Needs data/*.xlsx and .env (ANTHROPIC_API_KEY, ...) in the checkout; both are gitignored, so copied by hand.
+[Unit]
+Description=Indurent matching web app (~/repos/Indurent/app)
+After=network.target
+
+[Service]
+Type=simple
+User=tony
+WorkingDirectory=/home/tony/repos/Indurent
+ExecStart=/home/tony/repos/Indurent/.venv/bin/streamlit run app/app.py --server.address 127.0.0.1 --server.port 8503 --server.headless true --browser.gatherUsageStats false
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
