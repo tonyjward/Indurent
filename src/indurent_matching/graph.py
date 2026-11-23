@@ -250,17 +250,17 @@ def make_tools(data: T.Data) -> list:
 # --- The graph ---------------------------------------------------------------------------------------------------
 
 
-def default_model() -> ChatAnthropic:
+def default_model(effort: str | None = None) -> ChatAnthropic:
     """Claude, as configured by CHAT_MODEL and CHAT_EFFORT (key from ANTHROPIC_API_KEY or .env).
 
-    If ANTHROPIC_WORKSPACE_ID is set (a key that isn't scoped to one workspace), it's sent as a header so the
-    requests go to that workspace, as in the fpl chat app.
+    `effort` overrides CHAT_EFFORT (the eval judge uses "low"). If ANTHROPIC_WORKSPACE_ID is set (a key that isn't
+    scoped to one workspace), it's sent as a header so the requests go to that workspace, as in the fpl chat app.
     """
     workspace_id = os.environ.get("ANTHROPIC_WORKSPACE_ID")
     return ChatAnthropic(
         model=MODEL,
         max_tokens=16000,
-        output_config={"effort": EFFORT},
+        output_config={"effort": effort or EFFORT},
         default_headers={"anthropic-workspace-id": workspace_id} if workspace_id else None,
     )
 
