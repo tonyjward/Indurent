@@ -149,18 +149,19 @@ Each answer gets four checks:
 | Check | How | Final result (36 runs) |
 |---|---|---|
 | **Trajectory**: the right tools, with the right arguments | code | 36 of 36 |
-| **Numbers**: every number in the answer comes from a tool | code | 35 of 36 |
-| **Faithfulness and scope**: no unsupported claims; declines what it should | Claude as judge | 25 of 36 |
+| **Numbers**: every number in the answer comes from a tool | code | 34 of 36 |
+| **Faithfulness and scope**: no unsupported claims; declines what it should | Claude as judge | 23 of 36 |
 | **Right answer**: the right units, in order, with the right values | code, against a reference from the tools | **36 of 36** |
 
-Every one of the 36 answers reported the right result. The judge's failures are all about wording: a sentence that
-goes a little beyond the tools, such as giving a reason for something the tool didn't explain.
+Every one of the 36 answers reported the right result (and all 36 in the measurement before). The judge's failures
+are about wording: a sentence that goes a little beyond the tools, a different one each run.
 
 **The evals changed the system.** The first run passed 6 of 12. The judge kept finding the same pattern: Claude
 rarely invented anything outright, but it filled small gaps between tool facts with plausible claims (reading a
 blank "estate" field as "none", or calling a listing "small" when the score said only "atypical"). Rules in the
-prompt weren't enough; the fix was to make the tools state those facts, so there was nothing left to infer. Three
-rounds of that took it to 24 of 36 passing all four checks. The details, run by run, are in DESIGN.md section 5.
+prompt weren't enough; the fix was to make the tools state those facts, so there was nothing left to infer. Four
+rounds of that took it to 23-24 of 36 runs passing all four checks (it varies from run to run). The details, run by
+run, are in DESIGN.md section 5.
 
 ## Production notes
 

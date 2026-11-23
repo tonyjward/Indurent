@@ -290,35 +290,51 @@ was missing. Trajectory and numbers passed on every case, as in the second run. 
 With one run per case, totals move by a case or two from run to run (the agent and the judge both vary), so the
 pass rate is measured with `--repeats 3`.
 
-### The final measurement (2026-11-23)
+### Measurement after the third round (2026-11-23, 16:33)
 
-All 12 cases, 3 runs each (36 runs, $3.52), after the third round of fixes:
+All 12 cases, 3 runs each (36 runs, $3.52): trajectory 36 of 36, numbers 35, judge 25, right answer **36 of 36**
+(scored afterwards on the saved answers), all four 24 of 36. Two cases failed every run:
+
+- **Prompt 3:** "the owned estate's units were removed because they're over 10 miles from a city". The tool only
+  said the filter removed them; they could also have had no location. One more gap of the tool kind.
+- **Prompt 1:** "weighted equally" said of all five listings, when M2 is scored on size alone and M5 without
+  location. Each tool result said this correctly: Claude over-summarised.
+
+The fourth round closed the prompt 3 gap (the caveat now gives the estate's distance from a city and how many of
+its units have no location) and said that tied units are in order of exact distance.
+
+### The final measurement (2026-11-23, 18:56)
+
+The same 36 runs ($3.31), after the fourth round and the rename of "block" to "dimension" throughout:
 
 | Check | Passed |
 |---|---|
-| Trajectory (right tools and arguments) | 36 of 36 |
-| Numbers (none invented) | 35 of 36 |
-| Judge (no unsupported claims, right behaviour) | 25 of 36 |
-| Right answer (scored afterwards on the saved answers) | **36 of 36** |
-| All four | 24 of 36 (67%), against 6 of 12 (50%) on the first run |
+| Trajectory (right tools and arguments) | **36 of 36** |
+| Numbers (none invented) | 34 of 36 |
+| Judge (no unsupported claims, right behaviour) | 23 of 36 |
+| Right answer | **36 of 36** |
+| All four | 23 of 36 (64%), against 24 of 36 in the previous measurement and 6 of 12 (50%) on the first run |
 
-**Every one of the 36 answers reported the right result:** the right units, in the right order, with the right
-values, and the counts the user needs. The agent's tool use is reliable. The judge failures are all about wording:
-a sentence that goes a little beyond what the tools say.
+**Every one of the 36 answers reported the right result**, for the second measurement running: the right units, in
+the right order, with the right values, and the counts the user needs. Tool use was right every time.
 
 | Case | Runs | What went wrong |
 |---|---|---|
-| similar to M3, size only (M2), weighted location, refine, EPC filter, prompt 2 | PPP | |
-| include unknowns, guess M2's build year | PFP | one-off slips |
-| rent for M3 | FFP | declined correctly, then called some units "the strongest benchmarks" without evidence |
-| nearest to Spitfire Park | PFF | commented on the order of tied units, which the tool doesn't give |
-| prompt 1 (most similar) | FFF | "weighted equally" said of all five listings; M2 is scored on size alone, M5 without location |
-| prompt 3 (closest, within 10 miles) | FFF | "the owned estate's units were removed because they're over 10 miles from a city"; the tool only says the filter removed them (they could also have had no location) |
+| similar to M3, size only (M2), weighted location, guess M2's build year | PPP | |
+| prompt 1, prompt 2, EPC filter | PFP / PPF / PFP | one slip each: "weighted equally" for all five again; "no other listing comes close to M3", which M4 beats on location; an invented "0.983" (caught by the number check) |
+| prompt 3 | FFP | the estate-removal guess is gone. One failure was the judge listing a claim it then called "not flagged"; in the other, Claude said units with no location can't be ranked by distance instead of offering to include them, which is right (the case now accepts it) |
+| nearest to Spitfire Park | PFF | once called the tie order "close to arbitrary", against the tool's caveat; once flagged for "up to 50 in one search", which is in the tool's own description (the checks now see the descriptions) |
+| refine, include unknowns, rent for M3 | FFP / FPF / FFP | small overreaches: what a rerun "would bring back", "within about 9 miles" for 9.1-9.2, assuming Indurent has rent data for an estate |
 
-Tuning stopped here. The gaps that were in the tools were closed round by round; what's left is the model
-overreaching in its own words, and tuning further against these 12 cases would make the score say less about new
-questions. The prompt 3 gap is one more of the tool kind (the caveat could say why the units were removed), and
-the production validation step (section 7) is the guard for the rest.
+Two things came out of this run's failures for the evals themselves: the right-answer check first marked two
+correct answers wrong (Claude wrote tied units together, "| 170, 169, 167 |" and "689 and 221 (...)"; it now reads
+both), and the two eval fixes noted in the table.
+
+**Where this leaves it.** Across the last two measurements, 23-24 of 36 runs pass all four checks, and all 72 report
+the right result. The gaps that were in the tools were closed round by round, and what's left is the model
+overreaching in its own words, a different sentence each run. Tuning further against these 12 cases would make the
+score say less about new questions. The production validation step (section 7) is the guard for the rest: its
+number and right-answer checks would have caught the invented "0.983" before it reached the user.
 
 ## 6. Streamlit app and deployment
 
