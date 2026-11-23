@@ -38,10 +38,10 @@ def epc_c_or_better(conditions) -> bool:
 
 
 def location_doubled(weights) -> bool:
-    """True if location counts twice as much as each other block (e.g. {"location": 2})."""
+    """True if location counts twice as much as each other dimension (e.g. {"location": 2})."""
     if not isinstance(weights, dict):
         return False
-    others = [weights.get(block, 1) for block in ("age", "physical")]
+    others = [weights.get(dimension, 1) for dimension in ("age", "physical")]
     return all(weights.get("location", 1) == 2 * other for other in others)
 
 

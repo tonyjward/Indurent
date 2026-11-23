@@ -98,7 +98,7 @@ def test_list_listings(data):
     assert "falls in Wales" in out["listings"][0]["quality_notes"][0]
     assert out["summary"] == (
         "5 marketed listings: M1, M2, M3, M4, M5. "
-        "2 can't be compared on every block: M2 (no age or location), M5 (no location)."
+        "2 can't be compared on every dimension: M2 (no age or location), M5 (no location)."
     )
 
 
@@ -157,7 +157,7 @@ def test_find_similar_options(data):
     assert weighted["summary"].endswith("weighted as requested: {'location': 2}")
     with pytest.raises(ToolError, match="k must be"):
         find_similar(data, "M3", k=0)
-    with pytest.raises(ToolError, match="unknown blocks"):
+    with pytest.raises(ToolError, match="unknown dimensions"):
         find_similar(data, "M3", weights={"eaves": 1})
 
 

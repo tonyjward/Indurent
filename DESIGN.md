@@ -17,7 +17,7 @@ src/indurent_matching/
   data.py        load + clean both files, attach quality flags          (step 1: preprocess)
   geo.py         coastline/region checks, nearest major city
   config.py      thresholds, city list, known-issues register
-  similarity.py  homogeneity scores and pairwise similarity per block   (step 2: vectorise)
+  similarity.py  homogeneity and pairwise similarity per dimension      (step 2: vectorise)
   tools.py       filter_rows, find_similar, homogeneity_scores, ...     (step 3: retrieval)
   graph.py       LangGraph StateGraph, system prompt                    (steps 4-5: prompt + answer)
   chat.py        stream an answer and read back its tool calls (for the app)
@@ -78,17 +78,17 @@ the owners of the source data so the records get fixed.
 
 Structured data gets **numeric** features, not text embeddings: text embeddings handle magnitudes badly
 ("12,000" and "120,000" look alike) and can't apply the quality rules. The evidence for each choice below is in
-[`notebooks/02_similarity`](notebooks/02_similarity.ipynb), one section per block.
+[`notebooks/02_similarity`](notebooks/02_similarity.ipynb), one section per dimension.
 
-Three blocks, matching the brief's prompt 2, each scored on its own feature:
+Three dimensions, matching the brief's prompt 2, each scored on its own feature:
 
-| Block | Feature | Usable values |
+| Dimension | Feature | Usable values |
 |---|---|---|
 | Age | build year | recorded and not doubtful |
 | Location | latitude/longitude | high and medium confidence only |
 | Physical | size (log scale) | recorded and not doubtful |
 
-Every score is 0-1. A block a listing can't be scored on is **"not available"**, never 0 (M2 has no coordinates
+Every score is 0-1. A dimension a listing can't be scored on is **"not available"**, never 0 (M2 has no coordinates
 or build year; M5 is offshore).
 
 **Not scored, shown as context:** eaves height (only M4 and M5 have it; scoring it would put them on a different
@@ -99,10 +99,10 @@ with coordinates). All can be filtered on.
 ### Homogeneity scores (prompt 2): how typical is the listing of the portfolio?
 
 "Correlation score" is ambiguous; the interpretation used, and stated in every answer, is *how typical the
-listing is of the portfolio on each block*. Each score is scaled so the most typical value in the portfolio
+listing is of the portfolio on each dimension*. Each score is scaled so the most typical value in the portfolio
 scores 1:
 
-| Block | Score | Context reported alongside |
+| Dimension | Score | Context reported alongside |
 |---|---|---|
 | Age | Units in the listing's 5-year build-year band (1955-59, ..., 2020-22) / units in the most frequent band | |
 | Location | Best portfolio estate's mean miles to its 5 nearest other estates / the listing's mean miles to its 5 nearest estates, leaving out the estate it sits on | The estate it sits on ("sits on Velvet Park 60, which you own"); the nearest other estate; the percentile among portfolio estates |
@@ -115,10 +115,10 @@ from the listing's own estate at about 0 miles.
 
 ### Pairwise similarity (prompt 1): how similar is the listing to one portfolio unit?
 
-Each block uses the same form, similarity = 0.5^(gap / h), so it is 1 for an identical value and halves with
+Each dimension uses the same form, similarity = 0.5^(gap / h), so it is 1 for an identical value and halves with
 every step of h:
 
-| Block | Gap | Halves every |
+| Dimension | Gap | Halves every |
 |---|---|---|
 | Age | years between build years | 10 years |
 | Location | miles between the two (great-circle) | 10 miles |
@@ -128,9 +128,9 @@ Size uses a ratio where age and location use a fixed gap because what matters fo
 difference: 1,000 vs 2,000 sq ft is a different class of unit, while 100,000 vs 101,000 sq ft is effectively the
 same. Ten miles, or ten years, mean much the same wherever they fall.
 
-- **Combined score**: the mean of the blocks, equally weighted by default; weights are parameters.
-- **Missing blocks**: a block the *listing* lacks is dropped for that listing (M2 is matched on size only, and
-  the answer says so). A block a *portfolio unit* lacks scores 0, so a unit with less known about it can't
+- **Combined score**: the mean of the dimensions, equally weighted by default; weights are parameters.
+- **Missing dimensions**: a dimension the *listing* lacks is dropped for that listing (M2 is matched on size only, and
+  the answer says so). A dimension a *portfolio unit* lacks scores 0, so a unit with less known about it can't
   outrank one that matches on everything; the answer shows it as "unknown".
 - **No estate cap by default**: the answer is the literal top 10. Units on the estate a listing sits on genuinely
   are among the most similar, so a top 10 can be concentrated (M3's are all on Velvet Park 60, its own estate);
@@ -188,7 +188,7 @@ START -> agent <-> tools -> END
 
 | Layer | What | Cost |
 |---|---|---|
-| Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
+| Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing dimensions ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
 | Graph | scripted chat model replays chosen tool calls: the filter flows from `filter_rows` into the search tools only with `use_filter`, `refine` and `reset_filters` work, tool errors come back as messages | free, deterministic |
 | App | Streamlit AppTest of the real page with the scripted model: prompt buttons, streaming, the tool-call panel, New chat, errors shown in the chat | free, deterministic |
 | Eval checks | each check against good and deliberately wrong answers (a dropped unit, a swapped value, an invented figure) | free, deterministic |
@@ -348,7 +348,7 @@ addresses); a spend limit on the Anthropic workspace is a backstop either way.
 
 - Geocode from postcodes (ONS lookup) instead of trusting supplied coordinates; validate on ingest.
 - Feed the known-issues register back to data owners; track fixes.
-- Move vectors to pgvector/FAISS once the portfolio or listing volume justifies it; precompute portfolio blocks.
+- Move vectors to pgvector/FAISS once the portfolio or listing volume justifies it; precompute the portfolio's scores.
 - Retrieval over the methodology itself (decisions, EDA findings) so the model can explain *why* a rule applies.
 - Estate-level summaries as a second retrieval unit ("which estates does this listing resemble?").
 - Tracing is on (LangSmith, with evals in their own project); next would be eval runs in CI on a fixed budget, and

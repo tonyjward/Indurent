@@ -1,14 +1,14 @@
-"""Similarity between a marketed listing and the portfolio, one block at a time (age, location, physical).
+"""Similarity between a marketed listing and the portfolio, one dimension at a time (age, location, physical).
 
 Two kinds of score, each between 0 and 1 (DESIGN.md section 2; evidence in notebooks/02_similarity):
 
-* **Homogeneity** (prompt 2): how typical the listing is of the portfolio on one block. Each is scaled so the most
-  typical value in the portfolio scores 1.
-* **Pairwise similarity** (prompt 1): how similar the listing is to each portfolio unit on one block. Every block
-  uses the same form, `0.5 ** (gap / half_life)`: 1 for an identical value, halving with each half-life.
+* **Homogeneity** (prompt 2): how typical the listing is of the portfolio on one dimension. Each is scaled so the
+  most typical value in the portfolio scores 1.
+* **Pairwise similarity** (prompt 1): how similar the listing is to each portfolio unit on one dimension. Every
+  dimension uses the same form, `0.5 ** (gap / half_life)`: 1 for an identical value, halving with each half-life.
 
 NaN means "not available": the listing (or, for pairwise similarity, the unit) has no usable value. Turning a
-unit's NaN into 0 when the blocks are combined is a ranking decision, made where the blocks are combined.
+unit's NaN into 0 when the dimensions are combined is a ranking decision, made where the dimensions are combined.
 
 Each function takes one listing (a row of `load_marketed`) and the whole portfolio, and works on whole columns at
 once (vectorised with numpy), not unit by unit.
@@ -285,19 +285,19 @@ def size_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
     return halving(log_ratio, np.log(SIZE_HALF_LIFE_RATIO))
 
 
-# --- Combining the blocks (03_answers, prompt 1) ----------------------------------------------------------------------
+# --- Combining the dimensions (03_answers, prompt 1) ------------------------------------------------------------------
 
-BLOCKS = ("age", "location", "physical")
+DIMENSIONS = ("age", "location", "physical")
 
 
-def _listing_blocks(listing: pd.Series) -> list[str]:
-    """The blocks the listing can be compared on: those where it has a usable value."""
+def _listing_dimensions(listing: pd.Series) -> list[str]:
+    """The dimensions the listing can be compared on: those where it has a usable value."""
     has = {
         "age": pd.notna(usable(listing, "build_year")),
         "location": bool(has_usable_location(listing)),
         "physical": pd.notna(usable(listing, "size_sqft")),
     }
-    return [block for block in BLOCKS if has[block]]
+    return [dimension for dimension in DIMENSIONS if has[dimension]]
 
 
 def most_similar(
@@ -310,13 +310,13 @@ def most_similar(
     """The `k` portfolio units most similar to the listing, best first (prompt 1).
 
     Each unit is scored on age, location and physical (size) with the pairwise functions above, and the overall
-    score is the weighted average of those blocks (equal weights unless `weights` says otherwise, e.g.
+    score is the weighted average of those dimensions (equal weights unless `weights` says otherwise, e.g.
     `{"location": 2}`). Two rules handle missing values:
 
-    * a block the **listing** has no usable value for is dropped, so M2 (no build year or location) is matched on
+    * a dimension the **listing** has no usable value for is dropped, so M2 (no build year or location) is matched on
       size alone;
-    * a block a **unit** has no usable value for counts as 0, so a unit we know less about can't outrank one that
-      matches on everything. Its block column is left blank, so an answer can say "unknown" rather than
+    * a dimension a **unit** has no usable value for counts as 0, so a unit we know less about can't outrank one that
+      matches on everything. Its dimension column is left blank, so an answer can say "unknown" rather than
       "dissimilar".
 
     Ties are broken by Property Id, so results don't change between runs. There's no cap on units per estate unless
@@ -327,12 +327,12 @@ def most_similar(
     `location` and `physical` scores, and the facts behind them (`build_year`, `size_sqft`,
     `miles_from_listing`).
     """
-    used = _listing_blocks(listing)
+    used = _listing_dimensions(listing)
     if not used:
         raise ValueError("the listing has no usable build year, location or size to compare")
-    weights = {block: 1.0 for block in BLOCKS} | (weights or {})
-    if unknown := set(weights) - set(BLOCKS):
-        raise ValueError(f"unknown blocks in weights: {sorted(unknown)}; expected {list(BLOCKS)}")
+    weights = {dimension: 1.0 for dimension in DIMENSIONS} | (weights or {})
+    if unknown := set(weights) - set(DIMENSIONS):
+        raise ValueError(f"unknown dimensions in weights: {sorted(unknown)}; expected {list(DIMENSIONS)}")
 
     scores = pd.DataFrame(
         {
@@ -341,8 +341,8 @@ def most_similar(
             "physical": size_similarity(listing, portfolio),
         }
     )
-    block_weights = pd.Series({block: weights[block] for block in used})
-    overall = scores[used].fillna(0).mul(block_weights).sum(axis=1) / block_weights.sum()
+    dimension_weights = pd.Series({dimension: weights[dimension] for dimension in used})
+    overall = scores[used].fillna(0).mul(dimension_weights).sum(axis=1) / dimension_weights.sum()
 
     miles = miles_to_units(listing, portfolio) if "location" in used else np.nan
     result = pd.DataFrame(
@@ -350,7 +350,7 @@ def most_similar(
             "industrial_estate_name": portfolio["industrial_estate_name"],
             "unit_name": portfolio["unit_name"],
             "overall": overall,
-            **{block: scores[block] if block in used else np.nan for block in BLOCKS},
+            **{dimension: scores[dimension] if dimension in used else np.nan for dimension in DIMENSIONS},
             "build_year": portfolio["build_year"],
             "size_sqft": portfolio["size_sqft"],
             "miles_from_listing": miles,

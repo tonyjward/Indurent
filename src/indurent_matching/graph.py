@@ -48,7 +48,7 @@ Never estimate or fill in a missing value.
 - Cite portfolio units as "Property Id 869" (or "Property Ids 869, 865 and 857").
 - If a request doesn't say which marketed listing it means and there's more than one, ask, or answer for every \
 listing. Never pick one silently.
-- Lead with what limits the answer: blocks a listing can't be compared on (e.g. no coordinates), and data-quality \
+- Lead with what limits the answer: dimensions a listing can't be compared on (e.g. no coordinates), and data-quality \
 notes. Pass on the caveats the tools return.
 - Raise only the data-quality issues the tools report (quality_notes and caveats), in their own terms. Don't \
 infer your own, e.g. from a region label and a nearest city, and don't explain a result in ways the tools don't.

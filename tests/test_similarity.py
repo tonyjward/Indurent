@@ -237,7 +237,7 @@ def test_size_scores_match_notebook(portfolio, marketed):
     assert size_similarity(marketed.loc["M3"], portfolio).isna().sum() == 10  # the 10 doubtful sizes
 
 
-# --- Combining the blocks ----------------------------------------------------------------------------------------
+# --- Combining the dimensions ----------------------------------------------------------------------------------------
 
 
 def _unit(estate, lat, build_year, size, confidence="high"):
@@ -267,7 +267,7 @@ CANDIDATES = pd.DataFrame(
 TARGET = pd.Series(_unit("listing", 52.0, 2000, 4_000))
 
 
-def test_most_similar_ranking_and_missing_blocks():
+def test_most_similar_ranking_and_missing_dimensions():
     out = most_similar(TARGET, CANDIDATES)
     assert out.index.tolist() == [0, 1, 2, 3, 4]  # 2 and 3 tie at 0.67: Property Id order
     assert out["overall"].round(2).tolist() == [1.0, 0.83, 0.67, 0.67, 0.5]
@@ -275,7 +275,7 @@ def test_most_similar_ranking_and_missing_blocks():
     assert out.loc[0, "miles_from_listing"] == 0 and np.isnan(out.loc[3, "miles_from_listing"])
 
 
-def test_most_similar_drops_blocks_the_listing_lacks():
+def test_most_similar_drops_dimensions_the_listing_lacks():
     no_location = TARGET.copy()
     no_location["location_confidence"] = "unknown"
     out = most_similar(no_location, CANDIDATES)
@@ -292,7 +292,7 @@ def test_most_similar_weights_cap_and_k():
     assert out.index.tolist() == [0, 1, 2, 4, 3]
     assert most_similar(TARGET, CANDIDATES, max_per_estate=1).index.tolist() == [0, 2, 3]  # one unit per estate
     assert len(most_similar(TARGET, CANDIDATES, k=2)) == 2
-    with pytest.raises(ValueError, match="unknown blocks"):
+    with pytest.raises(ValueError, match="unknown dimensions"):
         most_similar(TARGET, CANDIDATES, weights={"eaves": 1})
 
 

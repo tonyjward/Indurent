@@ -361,7 +361,7 @@ class Scores:
 
     def check(self, answer: str, data) -> list[str]:
         scores = T.get_homogeneity_scores(data, self.listing)["scores"]
-        wanted = {block: value for block, value in scores.items() if value is not None}
+        wanted = {dimension: value for dimension, value in scores.items() if value is not None}
         lines = answer.splitlines()
         mentions = [n for n, line in enumerate(lines) if re.search(rf"\b{self.listing}\b", line)]
         if not mentions:

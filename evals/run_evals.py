@@ -7,7 +7,8 @@
 Each run is a fresh conversation; the agent and the judge are both Claude Opus 5.5 (the judge at low effort).
 It stops before starting a run once the spend reaches --budget, and saves after every run, so a stopped or
 failed run keeps what it has. Each run of this script saves results.json and report.md in its own dated folder,
-e.g. data/evals/2026-11-23-1505/ (gitignored: answers contain portfolio data), so earlier runs are kept. Needs ANTHROPIC_API_KEY in .env.
+e.g. data/evals/2026-11-23-1505/ (gitignored: answers contain portfolio data), so earlier runs are kept.
+Needs ANTHROPIC_API_KEY in .env.
 """
 
 import argparse

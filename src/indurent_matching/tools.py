@@ -19,7 +19,7 @@ import pandas as pd
 
 from indurent_matching.config import SITS_ON_ESTATE_MILES
 from indurent_matching.similarity import (
-    BLOCKS,
+    DIMENSIONS,
     has_usable_location,
     homogeneity_scores,
     miles_to_units,
@@ -83,23 +83,23 @@ def _resolve_listing(data: Data, listing: str) -> pd.Series:
 
 
 def _matched_on(listing: pd.Series) -> dict:
-    """Which blocks a listing can be compared on, and why any can't."""
-    blocks, missing = [], {}
+    """Which dimensions a listing can be compared on, and why any can't."""
+    dimensions, missing = [], {}
     if pd.notna(usable(listing, "build_year")):
-        blocks.append("age")
+        dimensions.append("age")
     else:
         missing["age"] = "no build year"
     if listing["location_confidence"] != "unknown":
-        blocks.append("location")
+        dimensions.append("location")
     elif pd.isna(listing["latitude"]) or pd.isna(listing["longitude"]):
         missing["location"] = "no coordinates"
     else:
         missing["location"] = "coordinates are offshore, so can't be trusted"
     if pd.notna(usable(listing, "size_sqft")):
-        blocks.append("physical")
+        dimensions.append("physical")
     else:
         missing["physical"] = "no usable size"
-    return {"matched_on": blocks, "not_available": missing}
+    return {"matched_on": dimensions, "not_available": missing}
 
 
 def _listing_facts(listing: pd.Series) -> dict:
@@ -163,21 +163,21 @@ def list_listings(data: Data) -> dict:
         data: the cleaned portfolio and listings. Filled in by the agent; the model doesn't supply it.
 
     Returns:
-        `summary`, and `listings`: one entry per listing with its facts, `matched_on` (the blocks it can be
-        compared on), `not_available` (the blocks it can't, with the reason) and `quality_notes`.
+        `summary`, and `listings`: one entry per listing with its facts, `matched_on` (the dimensions it can be
+        compared on), `not_available` (the dimensions it can't, with the reason) and `quality_notes`.
     """
     listings = [_listing_facts(row) for _, row in data.marketed.iterrows()]
     summary = f"{len(listings)} marketed listings: {', '.join(x['listing_id'] for x in listings)}."
 
-    # Spell out how many can't be compared on every block, so the model quotes the count rather than working it out.
+    # Spell out how many can't be compared on every dimension, so the model quotes the count rather than working it out.
     limited = []
     for x in listings:
         if x["not_available"]:
             limited.append(f"{x['listing_id']} (no {' or '.join(x['not_available'])})")
     if limited:
-        summary += f" {len(limited)} can't be compared on every block: {', '.join(limited)}."
+        summary += f" {len(limited)} can't be compared on every dimension: {', '.join(limited)}."
     else:
-        summary += " All can be compared on every block."
+        summary += " All can be compared on every dimension."
     return {"summary": summary, "listings": listings}
 
 
@@ -405,8 +405,8 @@ def find_similar(
     """The k portfolio units most similar to a marketed listing, best first (the brief's prompt 1).
 
     Similarity is scored separately on age, location and physical (size), each 0-1, and averaged with equal weights
-    unless `weights` says otherwise (only when the user asks for one dimension to count more). Blocks the listing
-    can't be compared on are dropped; a unit's unknown block counts as 0 and is shown as null.
+    unless `weights` says otherwise (only when the user asks for one dimension to count more). Dimensions the listing
+    can't be compared on are dropped; a unit's unknown dimension counts as 0 and is shown as null.
 
     There's no cap on units per estate: units on the estate a listing sits on are genuinely among the most similar.
     Set `max_per_estate` only when the user asks for a spread (e.g. "similar units on other estates").
@@ -420,7 +420,7 @@ def find_similar(
         listing: the listing's id ("M3") or name ("Spitfire Park", "Spitfire Park, Unit 42"). Case doesn't matter,
             and part of a name works if it matches only one listing.
         k: how many units to return, from 1 to 50 (default 10).
-        weights: relative weights for "age", "location" and "physical", e.g. `{"location": 2}`; blocks not named
+        weights: relative weights for "age", "location" and "physical", e.g. `{"location": 2}`; dimensions not named
             keep weight 1. Only when the user asks for one dimension to count more.
         max_per_estate: the most matches allowed from any one estate. Only when the user asks for a spread.
         candidates: the Property Ids to search, e.g. the `candidates` returned by `filter_rows`. None (the
@@ -432,7 +432,7 @@ def find_similar(
         `build_year`, `size_sqft`, `miles_from_listing` and `doubtful_fields`; and `caveats` to pass on.
 
     Raises:
-        ToolError: `k` out of range, an unknown listing or Property Id, an empty candidate set, an unknown block
+        ToolError: `k` out of range, an unknown listing or Property Id, an empty candidate set, an unknown dimension
             in `weights`, or a listing with nothing to compare.
     """
     # 1. Check the arguments and find the listing and the units to search.
@@ -446,18 +446,18 @@ def find_similar(
     # 2. Rank the units (the scoring itself is in similarity.most_similar).
     try:
         result = most_similar(row, pool, k=k, weights=weights, max_per_estate=max_per_estate)
-    except ValueError as error:  # e.g. an unknown block in weights: pass the message on to the model
+    except ValueError as error:  # e.g. an unknown dimension in weights: pass the message on to the model
         raise ToolError(str(error)) from error
     matches = _as_matches(result, data.portfolio)  # the ranked table -> one dictionary per unit
 
     # 3. Caveats: anything the answer should tell the user about how these matches were found.
-    blocks = _matched_on(row)
+    dimensions = _matched_on(row)
     caveats = []
 
-    # The listing can't be compared on every block (e.g. M2 has no build year or location).
-    if blocks["not_available"]:
-        missing = "; ".join(f"{block} ({reason})" for block, reason in blocks["not_available"].items())
-        caveats.append(f"Matched on {' and '.join(blocks['matched_on'])} only. Not available: {missing}.")
+    # The listing can't be compared on every dimension (e.g. M2 has no build year or location).
+    if dimensions["not_available"]:
+        missing = "; ".join(f"{dimension} ({reason})" for dimension, reason in dimensions["not_available"].items())
+        caveats.append(f"Matched on {' and '.join(dimensions['matched_on'])} only. Not available: {missing}.")
 
     # The listing sits on an estate Indurent owns: say so, and how many matches are on it.
     estate = sits_on_estate(row, data.portfolio)
@@ -466,13 +466,13 @@ def find_similar(
         caveats.append(_owned_estate_caveat(estate, on_estate, len(result), pool, candidates is not None, "matches"))
 
     # Some matches have no usable location, so they scored 0 on it.
-    if "location" in blocks["matched_on"]:
+    if "location" in dimensions["matched_on"]:
         unknown = int(result["location"].isna().sum())
         if unknown:
             caveats.append(f"{unknown} match(es) have no usable location (counted as 0 on location).")
 
     # Matched on size alone: many units can score about the same, so the list is one of several.
-    if blocks["matched_on"] == ["physical"] and len(result):
+    if dimensions["matched_on"] == ["physical"] and len(result):
         everything = most_similar(row, pool, k=len(pool))
         threshold = round(result["overall"].iloc[-1], 2)  # the last match's score, to 2 decimal places
         ties = int((everything["overall"].round(2) >= threshold).sum())
@@ -491,7 +491,7 @@ def find_similar(
         caveats.append(f"At most {max_per_estate} unit(s) per estate, as requested.")
 
     # 4. The result the model receives. The summary says how the scores were combined, so the answer can say it.
-    names = [{"physical": "physical (size)"}.get(block, block) for block in blocks["matched_on"]]
+    names = [{"physical": "physical (size)"}.get(dimension, dimension) for dimension in dimensions["matched_on"]]
     if len(names) == 1:
         scored_on = f"scored on {names[0]} alone"
     elif weights:
@@ -519,14 +519,14 @@ def _percent(share: float) -> float:
     return round(100 * float(share), 1)
 
 
-def _position(row: pd.Series, portfolio: pd.DataFrame, blocks: list[str]) -> dict:
+def _position(row: pd.Series, portfolio: pd.DataFrame, dimensions: list[str]) -> dict:
     """Where the listing's build year and size sit in the portfolio: the share of units older/newer, smaller/larger.
 
     A homogeneity score says how atypical a listing is, not which way (a low age score could mean old or new), so
-    this gives the direction. Only for the blocks the listing can be compared on.
+    this gives the direction. Only for the dimensions the listing can be compared on.
     """
     position = {}
-    if "age" in blocks:
+    if "age" in dimensions:
         years = usable(portfolio, "build_year").dropna()
         year = row["build_year"]
         position["age"] = {
@@ -534,7 +534,7 @@ def _position(row: pd.Series, portfolio: pd.DataFrame, blocks: list[str]) -> dic
             "pct_of_units_older": _percent((years < year).mean()),
             "pct_of_units_newer": _percent((years > year).mean()),
         }
-    if "physical" in blocks:
+    if "physical" in dimensions:
         sizes = usable(portfolio, "size_sqft").dropna()
         size = row["size_sqft"]
         position["physical"] = {
@@ -568,15 +568,15 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
     """
     row = _resolve_listing(data, listing)
     result = homogeneity_scores(row, data.portfolio)
-    blocks = _matched_on(row)
+    dimensions = _matched_on(row)
     location_context = {key: _value(v, 1) for key, v in result["location_context"].items()}
     location_context["sits_on_estate"] = _estate_status(row, data.portfolio)  # never a blank that reads as "no"
     return {
         "summary": f"Homogeneity scores for {row['listing_id']} ({row['industrial_estate_name']}, {row['unit_name']})",
         "meaning": HOMOGENEITY_MEANING,
-        "scores": {block: _value(result[block], 2) for block in BLOCKS},
-        "not_available": blocks["not_available"],
-        "position": _position(row, data.portfolio, blocks["matched_on"]),
+        "scores": {dimension: _value(result[dimension], 2) for dimension in DIMENSIONS},
+        "not_available": dimensions["not_available"],
+        "position": _position(row, data.portfolio, dimensions["matched_on"]),
         "location_context": location_context,
         "size_context": {key: _value(v, 1) for key, v in result["size_context"].items()},
         "listing": _listing_facts(row),
@@ -587,7 +587,7 @@ def get_homogeneity_scores(data: Data, listing: str) -> dict:
 
 
 def _as_nearest(nearest: pd.Series, pool: pd.DataFrame) -> list[dict]:
-    """Turn the nearest units (miles, indexed by Property Id) into one JSON-friendly dictionary per unit, nearest first."""
+    """Turn the nearest units (miles, by Property Id) into one JSON-friendly dictionary per unit, nearest first."""
     matches = []
     for property_id, miles in nearest.items():
         unit = pool.loc[property_id]
@@ -635,10 +635,10 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
     if not isinstance(k, int) or not 1 <= k <= 50:
         raise ToolError("k must be a whole number from 1 to 50")
     row = _resolve_listing(data, listing)  # "M3" or "Spitfire Park" -> the listing's row
-    blocks = _matched_on(row)
-    if "location" not in blocks["matched_on"]:  # no coordinates, or offshore
+    dimensions = _matched_on(row)
+    if "location" not in dimensions["matched_on"]:  # no coordinates, or offshore
         raise ToolError(
-            f"{row['listing_id']} can't be placed on the map: {blocks['not_available']['location']}. "
+            f"{row['listing_id']} can't be placed on the map: {dimensions['not_available']['location']}. "
             "Nearest properties can't be found for it; say so in the answer."
         )
     pool = _candidate_rows(data, candidates)  # the filtered set, or the whole portfolio

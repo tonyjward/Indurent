@@ -92,8 +92,8 @@ def show_listing(listing: dict) -> None:
     """One marketed listing in the sidebar, on one line. Its facts, and what it can't be compared on, show on hover."""
     year = listing["build_year"] if listing["build_year"] is not None else "year unknown"
     details = f"{listing['size_sqft']:,} sq ft · {year} · {listing['region_label'] or 'region unknown'}"
-    for block, reason in listing["not_available"].items():
-        details += f"  \nCan't compare on {block}: {reason}"
+    for dimension, reason in listing["not_available"].items():
+        details += f"  \nCan't compare on {dimension}: {reason}"
     st.markdown(f"**{listing['listing_id']}** {listing['estate']}, {listing['unit']}", help=details)
 
 

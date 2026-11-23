@@ -34,10 +34,17 @@ left out and counted, not quietly matched.
 
 **What we did instead.** Explicit, tested functions for each part of the question, given to the model as tools:
 
-1. **Similarity functions** (`similarity.py`), one per block the brief names, each on a scale of 0 to 1:
-   **age** (build year), **location** (straight-line miles) and **physical** (size, compared as a ratio).
-   Each has a *homogeneity* form (how typical a listing is of the portfolio, for prompt 2) and a *pairwise* form
-   (how similar the listing is to one unit, for prompt 1). Every choice is backed by evidence in the notebooks.
+1. **Similarity functions** (`similarity.py`), one for each of the three dimensions the brief names, each scored
+   from 0 to 1:
+   - **Age:** compares build years.
+   - **Location:** compares straight-line miles.
+   - **Physical:** compares size, as a ratio (twice the size counts the same at 2,000 sq ft as at 200,000).
+
+   Each dimension is scored in two ways:
+   - **Homogeneity:** how typical the listing is of the whole portfolio (prompt 2).
+   - **Pairwise similarity:** how similar the listing is to one portfolio unit (prompt 1).
+
+   Every choice is backed by evidence in the notebooks.
 2. **Tools** (`tools.py`): plain Python that the model calls, such as `filter_rows`, `find_similar`, `find_nearest`
    and `get_homogeneity_scores`. Each returns a short summary, the rows that matter and the caveats to pass on;
    never the whole table. This is the *retrieval* in our RAG: exact retrieval over the portfolio, by filter and
@@ -198,7 +205,7 @@ open to anyone).
 | Notebook | What it shows |
 |---|---|
 | [`01_eda`](notebooks/01_eda.ipynb) | Every column examined; the evidence and decision behind each cleaning rule |
-| [`02_similarity`](notebooks/02_similarity.ipynb) | How each block (age, location, physical) is scored, and why |
+| [`02_similarity`](notebooks/02_similarity.ipynb) | How each dimension (age, location, physical) is scored, and why |
 | [`03_answers`](notebooks/03_answers.ipynb) | The three prompts answered straight from the code, for every listing |
 
 ### Project layout
@@ -208,7 +215,7 @@ src/indurent_matching/   the package
   config.py              thresholds, city list, known-issues register and similarity settings, each citing its evidence
   geo.py                 coastline and region checks, distances, nearest major city
   data.py                load and clean both spreadsheets
-  similarity.py          the three similarity blocks (age, location, size) and how they combine
+  similarity.py          the three similarity dimensions (age, location, size) and how they combine
   tools.py               the functions the AI calls: plain Python, no LangGraph or model
   graph.py               the LangGraph agent: Claude with the tools
   chat.py                streams an answer and reads back its tool calls (for the app)
