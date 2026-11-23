@@ -296,3 +296,11 @@ def test_scores_mentions_and_no_figures(data):
     rent = NoFigures(r"£\s?\d[\d,.]*|\d[\d,.]*\s*(?:per|/)\s*sq\.?\s?ft", "a rent figure")
     assert rent.check("I can't suggest a rent: the data has none.", data) == []
     assert rent.check("Offer about £8.50 per sq ft.", data) != []
+
+
+def test_numbers_from_the_tool_descriptions_are_supported(data):
+    # "up to 50 in one search" comes from find_nearest's description of k (1-50), not a tool result: a false
+    # alarm in the 2026-11-23-1856 run. run_case now passes the tools as the model sees them.
+    model = Scripted(replies=[AIMessage("I can list up to 50 units in one search.")])
+    result = run_case(case_named("scope_rent"), data, model, good_verdict)
+    assert result["numbers"]["passed"]

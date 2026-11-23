@@ -4,8 +4,9 @@ Four checks per case, cheapest first:
 
 * **Trajectory (code):** did it call the right tools, in the right order, with the right key arguments? Each case
   lists the calls it expects; other calls in between are fine. A case can also list tools it must not call.
-* **Numbers (code):** every number in the answer must appear in the tool results or the question. This catches
-  invented scores, distances, counts and Property Ids. It's the check a production validation step would run.
+* **Numbers (code):** every number in the answer must appear in the tool results, the tools' descriptions or the
+  question. This catches invented scores, distances, counts and Property Ids. It's the check a production
+  validation step would run.
 * **Judge (LLM):** Claude reads the tool results and the answer and lists any claim the results don't support
   (such as an invented link between two units, which the number check can't see because both Ids are real), any
   caveat the answer leaves out, and whether the answer behaved as the case expects (e.g. asked which listing, or
@@ -475,8 +476,10 @@ def run_case(case: Case, data, model, judge: Callable) -> dict:
     tool_results = [str(m.content) for m in messages if isinstance(m, ToolMessage)]
 
     trajectory = check_trajectory(calls, case.expect, case.forbid)
-    numbers = unsupported_numbers(answer, tool_results + case.questions)
-    descriptions = [f"{t.name}: {t.description}" for t in make_tools(data)]
+    # The tools as the model sees them: the description and every argument's (e.g. "k: how many units to return,
+    # 1-50"). A source for the judge, and for the number check.
+    descriptions = [f"{t.name}: {json.dumps(t.tool_call_schema.model_json_schema())}" for t in make_tools(data)]
+    numbers = unsupported_numbers(answer, tool_results + case.questions + descriptions)
     verdict, judge_tokens = judge(judge_messages(case, SYSTEM_PROMPT, descriptions, tool_results, answer))
     judge_ok = not verdict.unsupported_claims and verdict.behaviour_ok
     correct = check_answer(case, answer, data)

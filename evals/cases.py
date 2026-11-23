@@ -75,8 +75,9 @@ CASES = [
         ],
         forbid=["find_similar"],
         behaviour="Gives the nearest units on the map within 10 miles of a major city (for each listing that can "
-        "be located, or asks which). Says how many units were left out because their location is unknown, and "
-        "offers to include them.",
+        "be located, or asks which). Says how many units were left out because their location is unknown. It may "
+        "offer to include them, or explain that units with no location can't be ranked by distance; either is "
+        "right for a nearest-on-the-map search.",
         answer_checks=[
             *[
                 Ranking(listing, "find_nearest", filters=[(WITHIN_10_MILES, False)], required=False)
