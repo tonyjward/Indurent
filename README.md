@@ -16,7 +16,7 @@ two spreadsheets ──> clean + quality flags ──> similarity functions ─�
   [**example conversations**](outputs/README.md) with the agent
 - [**What we found in the data**](#what-we-found-in-the-data)
 - [**How we know it works**](#how-we-know-it-works): tests, and evals of the agent
-- [**Production notes**](#production-notes)
+- [**Extending to a production web app**](#extending-to-a-production-web-app): what's built, and what it would add
 - [**Running it**](#running-it)
 
 More detail: [`DESIGN.md`](DESIGN.md) (how it works and why), the [notebooks](#notebooks) (the evidence),
@@ -75,8 +75,9 @@ left out and counted, not quietly matched.
 | 5. Return results based on user-defined prompts | `app/app.py` (a chat app) and [`outputs/`](outputs/README.md) (example conversations) |
 
 And the deliverables: the code is the package and [notebooks](#notebooks), with docstrings throughout; the output
-from testing the example prompts is in [`outputs/`](outputs/README.md); the production notes are
-[below](#production-notes).
+from testing the example prompts is in [`outputs/`](outputs/README.md); and for a production system behind a web
+app, there's a working web app, with what production would add beyond it, in
+[Extending to a production web app](#extending-to-a-production-web-app).
 
 ## Answers to the three prompts
 
@@ -184,18 +185,31 @@ prompt weren't enough; the fix was to make the tools state those facts, so there
 rounds of that took it to 23-24 of 36 runs passing all four checks (it varies from run to run). The details, run by
 run, are in DESIGN.md section 5.
 
-## Production notes
+## Extending to a production web app
 
-- **A validation step in the graph:** check every Property Id and number in an answer against the tool results
-  before it's sent, and send a failing answer back once. The evals' code checks are that step's code.
-- **Geocode from postcodes** rather than trusting supplied coordinates; validate on ingest, and send the
-  known-issues register back to the data owners.
-- **Spend and access controls** for a shared app: a spend-limited key, Cloudflare Access (email login), and prompt
-  caching for the system prompt.
-- **Evals in CI** on a fixed budget, tracking pass rates over time (tracing is already in LangSmith).
+**What's built.** `app/app.py` is a Streamlit chat over the agent, deployed on a server behind a Cloudflare Tunnel
+(DESIGN.md section 6):
+
+- The brief's prompts as one-click buttons, and answers that stream in as they're written.
+- **How this was worked out** under each answer: the tool calls behind it, so every number can be traced.
+- Conversation memory, so follow-ups refine a filter; tracing of every run in LangSmith.
+- The data loaded once and shared by every user; deploying a change is `git push` and a restart.
+
+**What a production version would add:**
+
+- **Access and spend:** the company's single sign-on (or Cloudflare Access) in front of the app, a spend-limited
+  API key per environment, per-user rate limits, and prompt caching for the system prompt.
+- **A check before answers are sent:** a validation step in the graph that checks every Property Id and number in
+  an answer against the tool results, and sends a failing answer back once. The evals' code checks are that step.
+- **Data:** a refresh pipeline that runs the cleaning rules on each new portfolio extract, geocodes from postcodes
+  rather than trusting supplied coordinates, and sends the known-issues register back to the data owners.
+- **Operations:** the evals in CI on a fixed budget, tracking pass rates over time; conversation history in a
+  database rather than memory; and an API (e.g. FastAPI) between the agent and any front end, so other tools can
+  use it.
+- **Answers as data:** structured output (matches, scores and caveats as fields), so the app renders tables and
+  charts rather than prose.
 - **Scale:** for a much larger portfolio, precompute the portfolio's scores and move the numeric features into a
   vector index (pgvector, FAISS).
-- **Structured answers** (matches, scores and caveats as fields), so the app renders tables rather than prose.
 
 More in DESIGN.md section 7.
 

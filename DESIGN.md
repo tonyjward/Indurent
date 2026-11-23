@@ -360,7 +360,7 @@ To deploy a change: `git push beast main` from the laptop, then `sudo systemctl 
 To restrict it, add a Cloudflare Access application for the hostname (email one-time PIN, an allowlist of
 addresses); a spend limit on the Anthropic workspace is a backstop either way.
 
-## 7. Production notes (for the write-up)
+## 7. Production notes: extending this behind a web app
 
 - Geocode from postcodes (ONS lookup) instead of trusting supplied coordinates; validate on ingest.
 - Feed the known-issues register back to data owners; track fixes.
@@ -376,6 +376,12 @@ addresses); a spend limit on the Anthropic workspace is a backstop either way.
   the rules, and tests cover the tools and the state flow. The evals' number and right-answer checks are this
   step's code, and the judge's findings (section 5) are what it would catch.
 - Structured output for answers (matches, scores, caveats as fields), so the app renders tables rather than prose.
+- Spend and access controls for a shared app: a spend-limited Anthropic key per environment, Cloudflare Access (or
+  the company's single sign-on) in front of it, and per-user rate limits.
+- A data refresh pipeline: run the cleaning rules on each new portfolio extract, and alert when a known-issues
+  register entry no longer matches (its Property Ids may have changed).
+- Conversation history in a database rather than memory (`InMemorySaver` loses it on a restart), and an API (e.g.
+  FastAPI) between the agent and any front end, so other tools can use it.
 
 ## Order of work
 
