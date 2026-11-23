@@ -6,7 +6,7 @@ similarity, retrieval over the portfolio, and an LLM to interpret requests and e
 - **How it works and why:** [`DESIGN.md`](DESIGN.md)
 - **Data-quality evidence behind every cleaning rule:** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)
 
-> Work in progress: data preparation is done; matching, the AI layer and the app follow.
+> Work in progress: data preparation, similarity, the tools and the agent are done; the web app follows.
 
 ## Setup
 
@@ -64,14 +64,41 @@ To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipy
 
 ```
 src/indurent_matching/   the package
+  config.py              thresholds, city list, known-issues register and similarity settings, each citing its evidence
+  geo.py                 coastline and region checks, distances, nearest major city
   data.py                load and clean both spreadsheets
-  geo.py                 coastline and region checks, nearest major city
-  config.py              thresholds, city list and known-issues register, each citing its EDA section
-notebooks/01_eda.ipynb   exploratory data analysis and the cleaning decisions
+  similarity.py          the three similarity blocks (age, location, size) and how they combine
+  tools.py               the functions the AI calls: plain Python, no LangGraph or model
+  graph.py               the LangGraph agent: Claude with the tools
+  studio.py              builds the graph on the real data for LangGraph Studio
+notebooks/               01 EDA; 02-04 similarity by block; 05 prompt 1; 06 the similarity functions;
+                         07 prompt 2; 08 the tools
 tests/                   pytest suite (conftest.py loads the spreadsheets once for the real-data tests)
 scripts/                 one-off maintenance scripts (see below)
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
+langgraph.json           tells `langgraph dev` where the graph is
 ```
+
+### How the modules fit together
+
+Each module is listed under the module that uses it:
+
+```
+studio.py / the app            loads the data and builds the agent
+├── data.py                    loads and cleans the spreadsheets
+│   └── geo.py                 coastline and region checks, distances
+└── graph.py                   the LangGraph agent: Claude with the tools
+    └── tools.py               the functions the AI calls
+        └── similarity.py      age, location and size scores
+            └── geo.py
+```
+
+`config.py` (thresholds and settings) isn't shown: the cleaning, geography and similarity modules all read their
+settings from it.
+
+The two branches meet only at the top: `data.py` produces the cleaned tables, and the agent branch works on them.
+Everything below `graph.py` is plain Python, so `tools.py` and `similarity.py` work without LangGraph or a model
+(from a notebook, the tests or the app).
 
 ## Maintenance
 

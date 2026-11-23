@@ -154,7 +154,7 @@ summaries, so the model never receives the full table.
   (the within / beyond / unknown rule). Summaries always report how many were excluded as unknown.
 - **Policy: exclude unknowns by default**, unless the user asks to include them or only asks to remove units known
   to fail the condition. The answer always states how many were left out and offers to include them. The system
-  prompt repeats this, and the `validate` step checks the count is mentioned whenever a filter was used. For prompt
+  prompt repeats this (a production version would also check it, see section 7). For prompt
   3 the choice doesn't change the ranking: `find_nearest` can't rank units without a usable location anyway.
 - EPC is allowed as a *filter* (the user's explicit choice), with the reliability caveat carried in the summary.
 - Tool descriptions state conventions, e.g. "excluding properties more than 10 miles from a major city" means
@@ -162,29 +162,32 @@ summaries, so the model never receives the full table.
 
 ## 4. Orchestration and prompting (`graph.py`)
 
-A hand-built LangGraph `StateGraph`:
+A hand-built LangGraph `StateGraph`, kept deliberately simple (the same pattern as the fpl chat app):
 
 ```
-START -> agent <-> tools -> validate -> respond -> END
-                              |
-                              +-> agent (once, with the error) if validation fails
+START -> agent <-> tools -> END
 ```
 
-- **State**: messages, candidate set, last results, listing in focus.
-- **validate** (code): every Property Id cited in the answer was returned by a tool this turn; the answer matches
-  the output schema. One retry, then answer with the failure stated.
+- **State**: the messages, and the candidate set from the last `filter_rows` (None for the whole portfolio).
+- **Tools**: the functions in `tools.py` with the data filled in, plus `reset_filters`. `filter_rows` stores its
+  result in the state (the ids aren't sent to the model); `find_similar` and `find_nearest` take a required
+  `use_filter` argument, so a filter is only used when the model says so.
 - **System prompt**: acquisitions-analyst role; use only tool results; cite Property Ids; lead with limitations of
-  the listing ("Tech Hub has no coordinates, so similarity is physical only"); report coverage and flags; never
-  estimate missing values; ask when the listing is ambiguous rather than picking one.
-- **Output**: structured (matches, block scores, caveats, summary), rendered by the app.
-- **Model**: Claude (`claude-opus-5-5` by default, `CHAT_MODEL` / `CHAT_EFFORT` env overrides), key from `.env`.
+  the listing ("Tech Hub has no coordinates, so similarity is physical only"); pass on caveats; never estimate
+  missing values; ask when the listing is ambiguous rather than picking one; "similar" -> `find_similar`,
+  "closest" -> `find_nearest`, "correlation score" -> how typical of the portfolio; exclude unknowns by default and
+  state the count; mention the estate a listing sits on.
+- **Model**: Claude (`claude-opus-5-5` by default, effort `medium`; `CHAT_MODEL` / `CHAT_EFFORT` env overrides),
+  key from `.env`.
+- **LangGraph Studio**: `langgraph.json` points `langgraph dev` at `studio.py`, which builds the graph on the real
+  data without a checkpointer (Studio supplies its own memory).
 
 ## 5. Testing
 
 | Layer | What | Cost |
 |---|---|---|
 | Tools | filter semantics (unknowns dropped/kept), optional estate cap, missing blocks ("not available" vs 0), known-issues flags, a listing with no coordinates | free, deterministic |
-| Graph | scripted chat model replays chosen tool calls: state flows filter -> similarity, validation rejects an invented Property Id, retry stops after one | free, deterministic |
+| Graph | scripted chat model replays chosen tool calls: the filter flows from `filter_rows` into the search tools only with `use_filter`, `refine` and `reset_filters` work, tool errors come back as messages | free, deterministic |
 | Tool-call evals | real model, `@pytest.mark.llm` (skipped by default): each case = prompt + expected calls and arguments | paid, run on request |
 
 Eval cases: the three brief prompts and rewordings; direction traps ("more than 10 miles" -> `<= 10`); ambiguity
@@ -220,6 +223,12 @@ Safeguards before sharing:
 - Retrieval over the methodology itself (decisions, EDA findings) so the model can explain *why* a rule applies.
 - Estate-level summaries as a second retrieval unit ("which estates does this listing resemble?").
 - Tracing (LangSmith/OpenTelemetry), eval runs in CI on a fixed budget, prompt caching for the system prompt.
+- **A validation step in the graph** (`agent <-> tools -> validate -> END`, with `validate` able to send an answer
+  back once): plain code that checks every Property Id the answer cites was returned by a tool in this turn, and
+  that a filter's unknown count is reported. A failing answer goes back to the model with the problem; a second
+  failure goes out with the problem stated. Left out here to keep the demo graph simple: the system prompt carries
+  the rules, and tests cover the tools and the state flow.
+- Structured output for answers (matches, scores, caveats as fields), so the app renders tables rather than prose.
 
 ## Order of work
 

@@ -229,3 +229,6 @@ docs/
 
 # Plotly iframe renderer output
 iframe_figures/
+
+# LangGraph Studio local server state (langgraph dev)
+.langgraph_api/

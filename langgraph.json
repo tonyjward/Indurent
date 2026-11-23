@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "indurent": "./src/indurent_matching/studio.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.12"
+}
