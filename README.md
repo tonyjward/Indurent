@@ -60,6 +60,51 @@ data is refreshed**; its Property Ids may no longer apply.
 
 To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipynb`.
 
+## Viewing the graph in LangSmith Studio
+
+[LangSmith Studio](https://docs.langchain.com/langsmith/studio) shows the agent's graph and lets you chat with it,
+step by step: each model call, each tool call and its result, and the state (the messages and the filtered
+`candidates`).
+
+1. **Add keys to `.env`** in the project root (gitignored, never committed):
+
+   ```
+   ANTHROPIC_API_KEY=...        # Claude; each prompt costs roughly $0.10-0.15
+   ANTHROPIC_WORKSPACE_ID=...   # optional: only for a key that isn't scoped to one workspace
+   LANGSMITH_API_KEY=...        # free LangSmith account
+   LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com   # only for an EU LangSmith account
+   LANGSMITH_TRACING=true
+   LANGSMITH_PROJECT=indurent
+   ```
+
+2. **Start the local server:**
+
+   ```bash
+   uv run langgraph dev
+   ```
+
+   It reads `langgraph.json`, builds the graph from `studio.py` on the real data, and opens Studio in the
+   browser. Restart it after changing `.env`.
+
+3. **Submit a prompt:** pick the `indurent` graph, add a human message under Input (e.g. one of the brief's
+   prompts) and press Submit. Each run is also saved as a trace in the `indurent` project on smith.langchain.com
+   (eu.smith.langchain.com for an EU account). The tests switch tracing off, so they don't create traces.
+
+**If Studio says "Failed to fetch":** the browser is blocking the Studio web page from reaching the server on
+localhost (Safari and Brave do this, and Chrome can too). Start the server with a tunnel instead, which gives it a
+public `trycloudflare.com` address:
+
+```bash
+uv run langgraph dev --tunnel
+```
+
+**If it then says the domain "is not allowed":** the tunnel address changes each time the server starts, and
+LangSmith only connects to domains on its list. Add the new `trycloudflare.com` domain under Advanced Settings in
+Studio's connection dialog.
+
+To run the brief's three prompts without Studio and save the answers to `data/examples/` (gitignored), run
+`uv run python scripts/run_brief_prompts.py` (about $0.40, stops at a $2 cap).
+
 ## Project layout
 
 ```
@@ -74,7 +119,7 @@ src/indurent_matching/   the package
 notebooks/               01 EDA; 02-04 similarity by block; 05 prompt 1; 06 the similarity functions;
                          07 prompt 2; 08 the tools
 tests/                   pytest suite (conftest.py loads the spreadsheets once for the real-data tests)
-scripts/                 one-off maintenance scripts (see below)
+scripts/                 the brief prompts run and the boundaries build (see above and below)
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
 langgraph.json           tells `langgraph dev` where the graph is
 ```
