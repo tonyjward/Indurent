@@ -102,6 +102,11 @@ def _matched_on(listing: pd.Series) -> dict:
 
 
 def _listing_facts(listing: pd.Series) -> dict:
+    """A listing's facts as the model sees them, with its data-quality notes.
+
+    The notes go wherever the facts go (list_listings, every search), so the model never has to work out a
+    data-quality problem for itself: in an eval it did, from a region label and a nearest city, and got it wrong.
+    """
     return {
         "listing_id": listing["listing_id"],
         "estate": listing["industrial_estate_name"],
@@ -114,7 +119,26 @@ def _listing_facts(listing: pd.Series) -> dict:
         "miles_to_city": _value(listing["miles_to_city"], 1),
         "epc_rating": _value(listing["epc_rating"]),
         **_matched_on(listing),
+        "quality_notes": list(listing["quality_notes"]),
     }
+
+
+def _owned_estate_caveat(estate: str, on_list: int, listed: int, pool: pd.DataFrame, filtered: bool, noun: str) -> str:
+    """The caveat for a listing on an estate Indurent owns: how many of the results are on it.
+
+    When a filtered search finds none on it, it also says why: the filter removed the estate's units, or they were
+    searched and ranked lower. Without this, the model guessed the reason (eval 2026-11-23).
+    """
+    caveat = (
+        f"The listing sits on {estate}, an estate Indurent already owns; {on_list} of the {listed} {noun} are on it."
+    )
+    if filtered and on_list == 0:
+        in_pool = int((pool["industrial_estate_name"] == estate).sum())
+        if in_pool == 0:
+            caveat += f" None of {estate}'s units are in the filtered set: the filter removed them."
+        else:
+            caveat += f" {in_pool} of its units are in the filtered set but rank below these."
+    return caveat
 
 
 def _candidate_rows(data: Data, candidates: list[int] | None) -> pd.DataFrame:
@@ -138,7 +162,7 @@ def list_listings(data: Data) -> dict:
 
     Returns:
         `summary`, and `listings`: one entry per listing with its facts, `matched_on` (the blocks it can be
-        compared on) and `not_available` (the blocks it can't, with the reason).
+        compared on), `not_available` (the blocks it can't, with the reason) and `quality_notes`.
     """
     listings = [_listing_facts(row) for _, row in data.marketed.iterrows()]
     summary = f"{len(listings)} marketed listings: {', '.join(x['listing_id'] for x in listings)}."
@@ -190,7 +214,6 @@ def get_listing(data: Data, listing: str) -> dict:
     row = _resolve_listing(data, listing)
     facts = _listing_facts(row)
     facts["sits_on_estate"] = _estate_status(row, data.portfolio)
-    facts["quality_notes"] = list(row["quality_notes"])
     return {"summary": f"{facts['listing_id']}: {facts['estate']}, {facts['unit']}", **facts}
 
 
@@ -438,10 +461,7 @@ def find_similar(
     estate = sits_on_estate(row, data.portfolio)
     if estate:
         on_estate = int((result["industrial_estate_name"] == estate).sum())
-        caveats.append(
-            f"The listing sits on {estate}, an estate Indurent already owns; {on_estate} of the "
-            f"{len(result)} matches are on it."
-        )
+        caveats.append(_owned_estate_caveat(estate, on_estate, len(result), pool, candidates is not None, "matches"))
 
     # Some matches have no usable location, so they scored 0 on it.
     if "location" in blocks["matched_on"]:
@@ -633,7 +653,8 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
     unplaced = int(miles.isna().sum())
     if unplaced:
         caveats.append(
-            f"{unplaced:,} of the {len(pool):,} units searched have no usable location, so couldn't be ranked."
+            f"{unplaced:,} of the {len(pool):,} units searched have no usable location, so couldn't be ranked. "
+            "Keeping or dropping them can't change this list."
         )
 
     # The last unit listed is as near as units left out, so the list is one of several equally near ones.
@@ -650,10 +671,7 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
     estate = sits_on_estate(row, data.portfolio)
     if estate:
         on_estate = sum(match["estate"] == estate for match in matches)
-        caveats.append(
-            f"The listing sits on {estate}, an estate Indurent already owns; {on_estate} of the "
-            f"{len(matches)} nearest are on it."
-        )
+        caveats.append(_owned_estate_caveat(estate, on_estate, len(matches), pool, candidates is not None, "nearest"))
 
     # The search was over a filtered set, not the whole portfolio.
     if candidates is not None:

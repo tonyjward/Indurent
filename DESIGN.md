@@ -240,6 +240,23 @@ enough: every number in these answers was real.
 - "51 miles or more" for a unit 51.5 miles away was flagged, because 51.5 rounds to 52. A number cut down to the
   precision written (rather than rounded) now counts too.
 
+### The second run (2026-11-23)
+
+5 of 12 passed ($1.05). The four gaps above were gone: Claude now said "unknown" for M2's estate, explained the
+358, and took direction and ties from the tools. The failures were new gaps of the same kind:
+
+| Cases | The tools said | Claude said | Fix |
+|---|---|---|---|
+| 4 | M1 is labelled North West, nearest city Cardiff (its quality note was only in `get_listing`) | "M1's location doesn't look right"; the same for M3 (labelled Midlands, 14 miles from Manchester), which is wrong: M3's location is high confidence | Quality notes go with every listing's facts; system prompt: raise only the data-quality issues the tools report |
+| 3 | After a filter, 0 of the 10 nearest are on the owned estate | "because the 10-mile filter removed them" (probably true, unstated) | The caveat says whether the filter removed the estate's units or they ranked lower |
+| 1 | 358 units have no location, so couldn't be ranked | "Keeping the unknowns didn't change the result" (true, unstated) | The caveat says keeping or dropping them can't change the list |
+
+Also one misquote ("15 km inside the East of England" for a note saying 15 km *outside* the South East, in the
+East of England), and two judge calls that are arguably harmless ("the 10th place is shared"; "the main size band").
+
+With one run per case, totals move by a case or two from run to run (the agent and the judge both vary), so the
+pass rate is measured with `--repeats 3`.
+
 ## 6. Streamlit app and deployment
 
 Pages: **Ask** (chat, with the tool calls and arguments shown), **Example prompts** (stored outputs for the three

@@ -94,6 +94,8 @@ def test_list_listings(data):
     assert [x["listing_id"] for x in out["listings"]] == ["M1", "M2", "M3", "M4", "M5"]
     m2 = out["listings"][1]
     assert m2["matched_on"] == ["physical"] and set(m2["not_available"]) == {"age", "location"}
+    # The data-quality notes come with the listing, so the model doesn't work out its own (eval 2026-11-23).
+    assert "falls in Wales" in out["listings"][0]["quality_notes"][0]
     assert out["summary"] == (
         "5 marketed listings: M1, M2, M3, M4, M5. "
         "2 can't be compared on every block: M2 (no age or location), M5 (no location)."
@@ -176,12 +178,17 @@ def test_prompt_3_filter_then_find_nearest(data):
     assert miles == sorted(miles) and out["matches"][0]["estate"] == "Jade Bridge 6"  # 9.1 miles
     assert {m["property_id"] for m in out["matches"]} <= set(near["candidates"])
     assert any("0 of the 10 nearest are on it" in c for c in out["caveats"])  # Velvet Park 60 is 14 miles from a city
+    # ...and the caveat says why, so the model doesn't guess (eval 2026-11-23).
+    assert any(
+        "None of Velvet Park 60's units are in the filtered set: the filter removed them" in c for c in out["caveats"]
+    )
 
 
 def test_find_nearest_whole_portfolio_and_unplaceable_listings(data):
     out = find_nearest(data, "M3")
     assert {m["estate"] for m in out["matches"]} == {"Velvet Park 60"}  # the estate it sits on
     assert any("358 of the 1,250 units" in c for c in out["caveats"])  # unknown locations can't be ranked
+    assert any("Keeping or dropping them can't change this list" in c for c in out["caveats"])
     # Velvet Park 60 has more units at 0.0 miles than the 10 listed: say so (eval 2026-11-23).
     assert "25 units are 0.0 miles or nearer, so these 10 aren't the only ones that near" in " ".join(out["caveats"])
     for listing, reason in [("M2", "no coordinates"), ("M5", "offshore")]:
@@ -202,3 +209,16 @@ def test_get_homogeneity_scores_prompt_2(data):
     m4 = get_homogeneity_scores(data, "M4")["position"]["physical"]
     assert m4 == {"size_sqft": 617, "pct_of_units_smaller": 1.3, "pct_of_units_larger": 98.7}
     assert list(get_homogeneity_scores(data, "M2")["position"]) == ["physical"]  # no build year, so no age
+
+
+def test_owned_estate_caveat_says_why_none_are_listed():
+    from indurent_matching.tools import _owned_estate_caveat
+
+    pool = pd.DataFrame({"industrial_estate_name": ["Velvet Park 60", "Jade Bridge 6"]})
+    without = pool[pool["industrial_estate_name"] != "Velvet Park 60"]
+    removed = _owned_estate_caveat("Velvet Park 60", 0, 10, without, filtered=True, noun="nearest")
+    assert removed.endswith("None of Velvet Park 60's units are in the filtered set: the filter removed them.")
+    ranked_lower = _owned_estate_caveat("Velvet Park 60", 0, 10, pool, filtered=True, noun="nearest")
+    assert ranked_lower.endswith("1 of its units are in the filtered set but rank below these.")
+    unfiltered = _owned_estate_caveat("Velvet Park 60", 0, 10, pool, filtered=False, noun="nearest")
+    assert unfiltered.endswith("0 of the 10 nearest are on it.")  # no reason needed without a filter
