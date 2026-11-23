@@ -190,7 +190,10 @@ def test_find_nearest_whole_portfolio_and_unplaceable_listings(data):
     assert any("358 of the 1,250 units" in c for c in out["caveats"])  # unknown locations can't be ranked
     assert any("Keeping or dropping them can't change this list" in c for c in out["caveats"])
     # Velvet Park 60 has more units at 0.0 miles than the 10 listed: say so (eval 2026-11-23).
-    assert "25 units are 0.0 miles or nearer, so these 10 aren't the only ones that near" in " ".join(out["caveats"])
+    assert "25 units are 0.0 miles or nearer (to 1 decimal place), so these 10 aren't the only ones that near" in (
+        " ".join(out["caveats"])
+    )
+    assert "within 0.25 miles of the listing" in " ".join(out["caveats"])  # what "sits on" means
     for listing, reason in [("M2", "no coordinates"), ("M5", "offshore")]:
         with pytest.raises(ToolError, match=reason):
             find_nearest(data, listing)

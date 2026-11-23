@@ -254,6 +254,29 @@ enough: every number in these answers was real.
 Also one misquote ("15 km inside the East of England" for a note saying 15 km *outside* the South East, in the
 East of England), and two judge calls that are arguably harmless ("the 10th place is shared"; "the main size band").
 
+### The third run (2026-11-23)
+
+7 of 12 passed ($1.16). Claude no longer raised data-quality issues of its own or guessed why the owned estate
+was missing. Trajectory and numbers passed on every case, as in the second run. What was left:
+
+- **A wrong caveat of ours.** `find_nearest` said tied units "are listed in Property Id order", but units that
+  show the same rounded distance (0.0 miles) are in order of their exact distance. Claude repeated it, and the
+  judge saw the table wasn't in Id order. The caveat now just says the distance is to 1 decimal place.
+- **A definition the judge didn't have.** Claude said an owned estate's units are "probably M3's closest
+  neighbours", which follows from what "sits on" means, but no result said so. The caveat now says it: at least
+  one of the estate's units is within 0.25 miles of the listing.
+- **Misreading its own numbers (2 cases).** "M3 is the most typical on all three dimensions" (M4 scores higher
+  on location); "1157 ranks lower because it's much smaller" (1157 ranks 2nd). These aren't gaps in the tools,
+  so a system prompt rule now says to compare only by the scores, and not to call one best overall or explain a
+  rank by one factor unless the scores show it. A production validation step is the stronger guard here.
+- One judge call that's arguably harmless (an opening sentence qualified two lines later).
+
+| Run | Passed | Trajectory | Numbers | Judge |
+|---|---|---|---|---|
+| 1 (no fixes) | 6 of 12 | 11 of 12 | 11 of 12 | 6 of 12 |
+| 2 (first fixes) | 5 of 12 | 12 of 12 | 12 of 12 | 5 of 12 |
+| 3 (second fixes) | 7 of 12 | 12 of 12 | 12 of 12 | 7 of 12 |
+
 With one run per case, totals move by a case or two from run to run (the agent and the judge both vary), so the
 pass rate is measured with `--repeats 3`.
 

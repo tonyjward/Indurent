@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from indurent_matching.config import SITS_ON_ESTATE_MILES
 from indurent_matching.similarity import (
     BLOCKS,
     has_usable_location,
@@ -130,7 +131,8 @@ def _owned_estate_caveat(estate: str, on_list: int, listed: int, pool: pd.DataFr
     searched and ranked lower. Without this, the model guessed the reason (eval 2026-11-23).
     """
     caveat = (
-        f"The listing sits on {estate}, an estate Indurent already owns; {on_list} of the {listed} {noun} are on it."
+        f"The listing sits on {estate}, an estate Indurent already owns (at least one of its units is within "
+        f"{SITS_ON_ESTATE_MILES} miles of the listing); {on_list} of the {listed} {noun} are on it."
     )
     if filtered and on_list == 0:
         in_pool = int((pool["industrial_estate_name"] == estate).sum())
@@ -657,14 +659,16 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
             "Keeping or dropping them can't change this list."
         )
 
-    # The last unit listed is as near as units left out, so the list is one of several equally near ones.
+    # The last unit listed is as near as units left out (at the 1 decimal place shown), so the list is one of
+    # several equally near ones. Not "listed in Property Id order": units that show the same rounded distance are
+    # still in order of their exact distance, and the model repeated the claim (eval 2026-11-23).
     if len(matches) == k and len(placed) > k:
         last = round(float(placed.iloc[k - 1]), 1)
         as_near = int((placed.round(1) <= last).sum())
         if as_near > k:
             caveats.append(
-                f"{as_near} units are {last} miles or nearer, so these {k} aren't the only ones that near "
-                "(ties are listed in Property Id order)."
+                f"{as_near} units are {last} miles or nearer (to 1 decimal place), so these {k} aren't the only "
+                "ones that near."
             )
 
     # The listing sits on an estate Indurent owns: say so, and how many of the nearest are on it.
