@@ -197,6 +197,18 @@ run, are in DESIGN.md section 5.
 
 **What a production version would add:**
 
+- **Lower cost per question.** Measured on the evals, a question costs about $0.07 with Claude Opus 5.5 ($0.03 to
+  $0.15; the brief's prompts answered for all five listings are the dearest). Nearly two-thirds of that is input:
+  each model call resends the system prompt, the tool definitions and the earlier tool results, and a question
+  averages 2.8 tool calls. Options, cheapest to try first:
+  - prompt caching for the system prompt and tool definitions, which are the same on every call;
+  - a **routing node**: a small, cheap model classifies the request (which listing; similar, typical, nearest,
+    filter, or out of scope) and sends it straight to the right tool path, so the larger model only writes the
+    answer, or a smaller model handles the simple requests end to end;
+  - a smaller model for the whole agent.
+
+  Each option is judged on the evals before switching: trajectory and right answer must stay at 36 of 36, and the
+  judge's pass rate mustn't drop. The eval report gives the cost of every run, so the saving is measured alongside.
 - **Access and spend:** the company's single sign-on (or Cloudflare Access) in front of the app, a spend-limited
   API key per environment, per-user rate limits, and prompt caching for the system prompt.
 - **A check before answers are sent:** a validation step in the graph that checks every Property Id and number in
@@ -206,8 +218,11 @@ run, are in DESIGN.md section 5.
 - **Operations:** the evals in CI on a fixed budget, tracking pass rates over time; conversation history in a
   database rather than memory; and an API (e.g. FastAPI) between the agent and any front end, so other tools can
   use it.
-- **Answers as data:** structured output (matches, scores and caveats as fields), so the app renders tables and
-  charts rather than prose.
+- **Tool results shown directly:** the app prints each tool's result (the ranked units, the scores) as a table in
+  the chat the moment the tool returns, straight from the tool, and the model only writes the interpretation and
+  caveats around it. The numbers then never pass through the model, so it can't mistype or invent one (the final
+  measurement had one invented score), and shorter answers cost less too. This worked well in an earlier app of
+  mine.
 - **Scale:** for a much larger portfolio, precompute the portfolio's scores and move the numeric features into a
   vector index (pgvector, FAISS).
 

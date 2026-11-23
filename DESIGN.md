@@ -362,6 +362,15 @@ addresses); a spend limit on the Anthropic workspace is a backstop either way.
 
 ## 7. Production notes: extending this behind a web app
 
+- **Cost per question.** On the final measurement, an agent turn averages about 10,800 input and 1,250 output tokens,
+  about $0.07 with Claude Opus 5.5 ($0.03 to $0.15); 63% of the cost is input, because each model call resends the
+  system prompt, the tool definitions and the earlier tool results, and a question averages 2.8 tool calls. To
+  bring it down: prompt caching for the fixed system prompt and tool definitions; a routing node, where a small,
+  cheap model classifies the request (which listing; similar, typical, nearest, filter, out of scope) and sends it
+  to the right tool path, leaving the larger model only the answer, or handling simple requests end to end with a
+  smaller model; or a smaller model throughout. Each is a change to `graph.py` that the evals can judge before it
+  ships: trajectory and right answer must stay at 36 of 36 and the judge's pass rate mustn't drop, with the cost of
+  each run reported alongside.
 - Geocode from postcodes (ONS lookup) instead of trusting supplied coordinates; validate on ingest.
 - Feed the known-issues register back to data owners; track fixes.
 - Move vectors to pgvector/FAISS once the portfolio or listing volume justifies it; precompute the portfolio's scores.
@@ -375,7 +384,10 @@ addresses); a spend limit on the Anthropic workspace is a backstop either way.
   failure goes out with the problem stated. Left out here to keep the demo graph simple: the system prompt carries
   the rules, and tests cover the tools and the state flow. The evals' number and right-answer checks are this
   step's code, and the judge's findings (section 5) are what it would catch.
-- Structured output for answers (matches, scores, caveats as fields), so the app renders tables rather than prose.
+- Tool results shown directly: the app renders each tool's result (ranked units, scores) as a table in the chat
+  as soon as the tool returns, and the model writes only the interpretation and caveats. Numbers never pass through
+  the model, so it can't mistype or invent one (the final measurement had one invented score, "0.983"); the
+  validation step then has less to check, and shorter answers cost less.
 - Spend and access controls for a shared app: a spend-limited Anthropic key per environment, Cloudflare Access (or
   the company's single sign-on) in front of it, and per-user rate limits.
 - A data refresh pipeline: run the cleaning rules on each new portfolio extract, and alert when a known-issues
