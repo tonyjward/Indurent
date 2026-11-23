@@ -78,9 +78,7 @@ the owners of the source data so the records get fixed.
 
 Structured data gets **numeric** features, not text embeddings: text embeddings handle magnitudes badly
 ("12,000" and "120,000" look alike) and can't apply the quality rules. The evidence for each choice below is in
-the similarity notebooks: [`02_similarity_build_year`](notebooks/02_similarity_build_year.ipynb),
-[`03_similarity_location`](notebooks/03_similarity_location.ipynb) and
-[`04_similarity_physical`](notebooks/04_similarity_physical.ipynb).
+[`notebooks/02_similarity`](notebooks/02_similarity.ipynb), one section per block.
 
 Three blocks, matching the brief's prompt 2, each scored on its own feature:
 

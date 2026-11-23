@@ -1,141 +1,207 @@
 # Indurent: matching marketed warehouses to the portfolio
 
-Python logic that compares marketed warehouse listings with Indurent's existing estate, using vectorised
-similarity, retrieval over the portfolio, and an LLM to interpret requests and explain results.
+An assistant for Indurent's Acquisitions team. Ask it about a newly marketed warehouse, and it compares the listing
+with Indurent's portfolio of 1,250 industrial units: the most similar units, how typical the listing is of the
+portfolio, and the nearest units on the map, with filters such as distance to a major city. Python does every
+calculation; Claude turns the question into tool calls and explains the results, with their caveats.
 
-- **How it works and why:** [`DESIGN.md`](DESIGN.md)
-- **Data-quality evidence behind every cleaning rule:** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)
+```
+two spreadsheets ──> clean + quality flags ──> similarity functions ──> tools ──> Claude (LangGraph) ──> answer
+                       (data.py, geo.py)         (similarity.py)      (tools.py)     (graph.py)         (app/)
+```
 
-## Setup
+- [**The approach**](#the-approach): why not text embeddings, and what instead
+- [**Answers to the three prompts**](#answers-to-the-three-prompts)
+- [**What we found in the data**](#what-we-found-in-the-data)
+- [**How we know it works**](#how-we-know-it-works): tests, and evals of the agent
+- [**Production notes**](#production-notes)
+- [**Running it**](#running-it)
+
+More detail: [`DESIGN.md`](DESIGN.md) (how it works and why), the [notebooks](#notebooks) (the evidence),
+[`DEVELOPMENT.md`](DEVELOPMENT.md) (keys, LangSmith Studio, deploying).
+
+## The approach
+
+**What we considered first.** The usual RAG pattern over documents: turn each portfolio row into a text chunk
+("Unit 5, Quartz Wharf 16, 17,340 sq ft, built 1976, ..."), embed the chunks, embed the listing the same way, and
+retrieve the nearest by cosine similarity.
+
+**Why we didn't.** The data is a table of numbers, and text embeddings don't treat numerical distance well:
+"12,000 sq ft" and "120,000 sq ft" look almost the same as text, and an embedding has no sense that 1976 is closer
+to 1977 than to 1997, or that two points 4 miles apart are neighbours. Nor can it apply rules: "exclude units more
+than 10 miles from a major city" is a filter, not a similarity, and units with unknown or doubtful values need to be
+left out and counted, not quietly matched.
+
+**What we did instead.** Explicit, tested functions for each part of the question, given to the model as tools:
+
+1. **Similarity functions** (`similarity.py`), one per block the brief names, each on a scale of 0 to 1:
+   **age** (build year), **location** (straight-line miles) and **physical** (size, compared as a ratio).
+   Each has a *homogeneity* form (how typical a listing is of the portfolio, for prompt 2) and a *pairwise* form
+   (how similar the listing is to one unit, for prompt 1). Every choice is backed by evidence in the notebooks.
+2. **Tools** (`tools.py`): plain Python that the model calls, such as `filter_rows`, `find_similar`, `find_nearest`
+   and `get_homogeneity_scores`. Each returns a short summary, the rows that matter and the caveats to pass on;
+   never the whole table. This is the *retrieval* in our RAG: exact retrieval over the portfolio, by filter and
+   score, rather than by embedding.
+3. **An agent** (`graph.py`): a LangGraph graph that gives the tools to Claude. A filtered set is held in the graph
+   state, so a follow-up ("now only those over 10,000 sq ft") narrows it further. The **prompt engineering** is in
+   the system prompt's rules (every number from a tool; ask which listing if it's unclear; lead with what limits
+   the answer; exclude unknowns by default and say how many) and in the tools' descriptions, which tell the model
+   when to use each one.
+4. **Tests and evals** to give guarantees that the system behaves as intended: unit tests for every function and
+   tool, and evals of the agent itself for **trajectory** (the right tools, with the right arguments),
+   **faithfulness** (nothing the tools didn't say), **scope** (declining what the data can't answer) and the
+   **right answer**.
+
+## Answers to the three prompts
+
+There are five marketed listings (M1-M5). Two can't be compared on everything: **M2** has no build year or
+coordinates (size only), and **M5**'s coordinates are 27 km offshore (no location). Full results for every listing
+are in [`notebooks/03_answers`](notebooks/03_answers.ipynb), straight from the code; the agent gives the same answers
+in conversation (checked by the evals).
+
+### Prompt 1: "Find the 10 most similar properties in the estate to the newly marketed property."
+
+**How we read it:** "the estate" is Indurent's portfolio. The prompt doesn't say which listing, so the agent asks,
+or answers for all five. Each unit is scored on age, location and size, each 0-1 and halving every 10 years, every
+10 miles, and each doubling or halving of size; the three are averaged with equal weights.
+
+| Listing | Compared on | Top match (overall score) | Where the top 10 are |
+|---|---|---|---|
+| M1 Cherry Lane, 16,860 sq ft, 1977 | age, location, size | Property Id 586, Quartz Wharf 16 (0.88) | 5 on Quartz Wharf 16, 4.4 miles away; 2 on Scarlet Pavilion 78, the estate it sits on |
+| M2 Tech Hub, 906 sq ft | size only | Property Id 602, Quartz Wharf 16 (1.00) | across estates: 11 units score 0.98 or more on size alone |
+| M3 Spitfire Park, 2,294 sq ft, 1976 | age, location, size | Property Id 869, Velvet Park 60 (0.84) | all 10 on Velvet Park 60, the estate it sits on |
+| M4 Stable Lane, 617 sq ft, 2000 | age, location, size | Property Id 26, Sable Mill 91 (0.70) | 7 on Sable Mill 91, the estate it sits on |
+| M5 Chancery Depot, 16,614 sq ft, 1966 | age, size | Property Id 482, Sapphire Grove 50 (0.93) | across estates (no location to cluster on) |
+
+**Worth knowing:** M1, M3 and M4 each sit on an estate Indurent already owns, so their best matches are often next
+door. There's no cap on units per estate by default; the agent applies one if the user asks for a spread.
+
+### Prompt 2: "Provide a correlation score for the homogeneity of the marketed property(ies) with the rest of the estate, scoring each by physical characteristics, location, and age separately."
+
+**How we read it:** "correlation score for homogeneity" as **how typical the listing is of the portfolio**, scored
+0-1 on each dimension, where 1 is the most typical value in the portfolio. The answer states this reading.
+
+| Listing | Age | Location | Physical (size) | Which way it's atypical |
+|---|---|---|---|---|
+| M1 | 0.86 | 0.23 | 0.41 | an isolated location (it falls in Wales, far from most estates); larger than 78% of units |
+| M2 | n/a | n/a | 0.38 | smaller than 95% of units |
+| M3 | 0.86 | 0.62 | 0.87 | fairly typical on all three |
+| M4 | 0.86 | 0.73 | 0.17 | smaller than 99% of units |
+| M5 | 0.20 | n/a | 0.41 | older than 97% of units (built 1966); larger than 78% |
+
+- **Age:** the share of portfolio units in the listing's 5-year build band, against the most frequent band.
+- **Location:** how close the listing's 5 nearest estates are, against the best-placed estate in the portfolio.
+- **Physical:** how many units are of a similar size (within a factor of 1.41 either way), against the most
+  crowded size in the portfolio. Eaves height is shown as context; doors were too unreliable to score.
+
+### Prompt 3: "Find the closest properties to the marketed property, after excluding any property in the portfolio that is more than 10 miles from a major city."
+
+**How we read it:** "closest" means **nearest on the map**, not most similar. Keep units with `miles_to_city <= 10`
+(16 major cities, listed in `config.py`), then rank by straight-line miles. **50 units** are within 10 miles of a
+city; **358 have no usable location** and are left out, and the answer says so and offers to include them. M2 and
+M5 can't be placed on the map, so they have no nearest units.
+
+| Listing | Nearest units within 10 miles of a major city |
+|---|---|
+| M1 | Property Id 348, Marble Works 29 (74.6 miles away; 7.9 miles from Birmingham), then Sapphire Junction 78 (88.1) |
+| M3 | Property Ids 170, 169, 167 and 168, Jade Bridge 6 (9.1-9.2 miles away; 7.1 miles from Manchester) |
+| M4 | Property Id 350, Onyx Pointe 12 (33.2 miles away; 8.6 miles from London), then Sable Crescent 13 (39.9) |
+
+**Worth knowing:** none of the estates M1, M3 and M4 sit on survives the filter (M3's Velvet Park 60 is 14 miles
+from Manchester), which is why the nearest units are some way off.
+
+## What we found in the data
+
+The EDA ([`notebooks/01_eda`](notebooks/01_eda.ipynb)) shaped every cleaning rule. The main findings:
+
+- **"Size sqm" holds square feet.** The values only make sense as sq ft, and their total matches Indurent's
+  published floor area, so the column is renamed rather than converted.
+- **358 of 1,250 units have no usable location:** no coordinates, or coordinates 1 km or more offshore. They're
+  left out of location scores and distance filters, and always counted in answers. Another 652 fall outside their
+  labelled region; they're kept, at medium confidence.
+- **A block of records looks shuffled.** In Property Ids 1173-1187, small units carry a big shed's eaves, doors and
+  yard depth, and big units a small one's. Those fields are flagged as doubtful for the block.
+- **Door counts are often an estate total** copied onto every unit, so doors aren't scored.
+- **EPC ratings look unreliable:** newer buildings are mostly rated E. The agent warns whenever a filter uses them.
+- Smaller items: Granite Mews 59's eaves are house height (2.1-2.4 m); seven EPC cells hold Excel's FALSE.
+
+Each value is kept, with a `_doubtful` flag and a plain-English note saying why it isn't used, so nothing is
+silently dropped. Rules tied to particular Property Ids are in a register in `config.py`, to review whenever the
+data is refreshed.
+
+## How we know it works
+
+**Unit tests** (132, no API calls): the cleaning rules, every similarity function and tool, the graph's state flow
+with a scripted model (a filter only reaches a search when asked; refine and reset work), the web app, and the
+eval checks themselves.
+
+**Evals of the agent** with real Claude: 12 cases (the three prompts word for word, variations such as a two-turn
+refine or an EPC filter, and two questions it should decline: a rent figure, and a guess at a missing build year).
+Each answer gets four checks:
+
+| Check | How | Final result (36 runs) |
+|---|---|---|
+| **Trajectory**: the right tools, with the right arguments | code | 36 of 36 |
+| **Numbers**: every number in the answer comes from a tool | code | 35 of 36 |
+| **Faithfulness and scope**: no unsupported claims; declines what it should | Claude as judge | 25 of 36 |
+| **Right answer**: the right units, in order, with the right values | code, against a reference from the tools | **36 of 36** |
+
+Every one of the 36 answers reported the right result. The judge's failures are all about wording: a sentence that
+goes a little beyond the tools, such as giving a reason for something the tool didn't explain.
+
+**The evals changed the system.** The first run passed 6 of 12. The judge kept finding the same pattern: Claude
+rarely invented anything outright, but it filled small gaps between tool facts with plausible claims (reading a
+blank "estate" field as "none", or calling a listing "small" when the score said only "atypical"). Rules in the
+prompt weren't enough; the fix was to make the tools state those facts, so there was nothing left to infer. Three
+rounds of that took it to 24 of 36 passing all four checks. The details, run by run, are in DESIGN.md section 5.
+
+## Production notes
+
+- **A validation step in the graph:** check every Property Id and number in an answer against the tool results
+  before it's sent, and send a failing answer back once. The evals' code checks are that step's code.
+- **Geocode from postcodes** rather than trusting supplied coordinates; validate on ingest, and send the
+  known-issues register back to the data owners.
+- **Spend and access controls** for a shared app: a spend-limited key, Cloudflare Access (email login), and prompt
+  caching for the system prompt.
+- **Evals in CI** on a fixed budget, tracking pass rates over time (tracing is already in LangSmith).
+- **Scale:** for a much larger portfolio, precompute the portfolio's scores and move the numeric features into a
+  vector index (pgvector, FAISS).
+- **Structured answers** (matches, scores and caveats as fields), so the app renders tables rather than prose.
+
+More in DESIGN.md section 7.
+
+## Running it
 
 Requires [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 if needed).
 
-1. **Install** the package and its dependencies into `.venv`:
-
-   ```bash
-   uv sync
-   ```
-
-2. **Add the assessment data** (not included in the repo). Copy the two spreadsheets into `data/`:
-
-   ```
-   data/Current Portfolio.xlsx
-   data/Marketed Warehouses.xlsx
-   ```
-
-3. **Run the tests:**
-
-   ```bash
-   uv run pytest
-   ```
-
-   Tests that need the spreadsheets are skipped if they aren't in `data/`.
-
-Run commands through `uv run` (or activate `.venv` first) so they use the project's environment, not a system or
-Anaconda Python.
-
-## Using it
-
-```python
-from indurent_matching.data import load_marketed, load_portfolio
-
-portfolio = load_portfolio("data/Current Portfolio.xlsx")  # one row per unit, keyed by property_id
-listings = load_marketed("data/Marketed Warehouses.xlsx")  # keyed by listing_id M1-M5
+```bash
+uv sync                                   # install into .venv
+# copy the two spreadsheets into data/: "Current Portfolio.xlsx" and "Marketed Warehouses.xlsx"
+uv run pytest                             # tests (those needing the spreadsheets skip without them)
+uv run jupyter lab                        # the notebooks
 ```
 
-Each row carries quality information:
-
-- `<field>_doubtful` flags for size, build year, yard depth, min and max eaves, and doors: the value is kept but
-  not used for matching.
-- `location_confidence`: `high` (inside its labelled region), `medium` (on land but outside it) or `unknown`
-  (no coordinates, or 1 km+ offshore). Unknown locations get no `nearest_city` / `miles_to_city`.
-- `quality_notes`: plain-English reasons, e.g. "coordinates are 27 km offshore, so location can't be used".
-- `doors_describe_unit`: False where the door count is an estate total copied onto every unit of the estate.
-
-Flags come from general rules (run on every row, including new listings) and from a known-issues register in
-`config.py`: findings tied to particular Property Ids in this file. **Review the register whenever the portfolio
-data is refreshed**; its Property Ids may no longer apply.
-
-To rerun the EDA notebook: `uv run jupyter lab`, then open `notebooks/01_eda.ipynb`.
-
-## The web app
-
-A chat page over the agent: ask about the marketed listings, or click one of the brief's three prompts. Under each
-answer, **How this was worked out** lists the tool calls behind it. With `ANTHROPIC_API_KEY` in `.env` (see the
-Studio section below for the variables):
+The agent needs `ANTHROPIC_API_KEY` in `.env` (DEVELOPMENT.md lists the other keys). Each question costs about
+$0.10-0.15.
 
 ```bash
-uv run streamlit run app/app.py     # http://localhost:8501
-```
-
-It's deployed on beast behind a Cloudflare Tunnel (DESIGN.md section 6; the address isn't in the repo while the
-app is open). To deploy a change:
-`git push beast main`, then on beast `sudo systemctl restart indurent-app`. `deploy/indurent-app.service` has the
-one-off install steps.
-
-## Evals
-
-The agent is tested against real Claude on 12 cases (the brief's prompts, variations, and questions it should
-decline), with four checks: the right tool calls, no invented numbers, no unsupported claims (Claude as judge), and
-the right answer against a reference worked out from the tools. Results and what they led to are in DESIGN.md
-section 5.
-
-```bash
-uv run python evals/run_evals.py                     # every case once (about $1.20); stops at --budget (default $50)
-uv run python evals/run_evals.py --repeats 3         # three runs each, for pass rates (about $3.50)
-uv run python evals/run_evals.py --cases scope_rent  # chosen cases only
+uv run streamlit run app/app.py                      # the chat app, at http://localhost:8501
+uv run python evals/run_evals.py                     # the evals once (about $1.20); --repeats 3 for pass rates
 uv run python evals/rescore.py data/evals/<run>      # re-check a saved run's answers (free)
 ```
 
-Each run saves `results.json` and `report.md` in a dated folder under `data/evals/` (gitignored: the answers contain
-portfolio data). Traces go to LangSmith; `LANGSMITH_PROJECT=indurent-evals` keeps them apart from the app's.
+The app is also deployed, on a home server behind a Cloudflare Tunnel (the address isn't in the repo while it's
+open to anyone).
 
-## Viewing the graph in LangSmith Studio
+### Notebooks
 
-[LangSmith Studio](https://docs.langchain.com/langsmith/studio) shows the agent's graph and lets you chat with it,
-step by step: each model call, each tool call and its result, and the state (the messages and the filtered
-`candidates`).
+| Notebook | What it shows |
+|---|---|
+| [`01_eda`](notebooks/01_eda.ipynb) | Every column examined; the evidence and decision behind each cleaning rule |
+| [`02_similarity`](notebooks/02_similarity.ipynb) | How each block (age, location, physical) is scored, and why |
+| [`03_answers`](notebooks/03_answers.ipynb) | The three prompts answered straight from the code, for every listing |
 
-1. **Add keys to `.env`** in the project root (gitignored, never committed):
-
-   ```
-   ANTHROPIC_API_KEY=...        # Claude; each prompt costs roughly $0.10-0.15
-   ANTHROPIC_WORKSPACE_ID=...   # optional: only for a key that isn't scoped to one workspace
-   LANGSMITH_API_KEY=...        # free LangSmith account
-   LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com   # only for an EU LangSmith account
-   LANGSMITH_TRACING=true
-   LANGSMITH_PROJECT=indurent
-   ```
-
-2. **Start the local server:**
-
-   ```bash
-   uv run langgraph dev
-   ```
-
-   It reads `langgraph.json`, builds the graph from `studio.py` on the real data, and opens Studio in the
-   browser. Restart it after changing `.env`.
-
-3. **Submit a prompt:** pick the `indurent` graph, add a human message under Input (e.g. one of the brief's
-   prompts) and press Submit. Each run is also saved as a trace in the `indurent` project on smith.langchain.com
-   (eu.smith.langchain.com for an EU account). The tests switch tracing off, so they don't create traces.
-
-**If Studio says "Failed to fetch":** the browser is blocking the Studio web page from reaching the server on
-localhost (Safari and Brave do this, and Chrome can too). Start the server with a tunnel instead, which gives it a
-public `trycloudflare.com` address:
-
-```bash
-uv run langgraph dev --tunnel
-```
-
-**If it then says the domain "is not allowed":** the tunnel address changes each time the server starts, and
-LangSmith only connects to domains on its list. Add the new `trycloudflare.com` domain under Advanced Settings in
-Studio's connection dialog.
-
-To run the brief's three prompts without Studio and save the answers to `data/examples/` (gitignored), run
-`uv run python scripts/run_brief_prompts.py` (about $0.40, stops at a $2 cap).
-
-## Project layout
+### Project layout
 
 ```
 src/indurent_matching/   the package
@@ -150,42 +216,12 @@ src/indurent_matching/   the package
   studio.py              builds the graph on the real data for LangGraph Studio
 app/                     the Streamlit web app (app.py) and its logo
 evals/                   eval cases, the runner and the rescorer
-deploy/                  the systemd service that runs the app on beast
-notebooks/               01 EDA; 02-04 similarity by block; 05 prompt 1; 06 the similarity functions;
-                         07 prompt 2; 08 the tools
-tests/                   pytest suite, no API calls (conftest.py loads the spreadsheets once; scripted.py is a
-                         fake chat model)
-scripts/                 the brief prompts run and the boundaries build (see above and below)
+notebooks/               01 EDA, 02 similarity, 03 answers
+tests/                   pytest suite, no API calls (scripted.py is a fake chat model)
+scripts/                 the brief prompts run through the agent; the UK boundaries build
+deploy/                  the systemd service that runs the app
 data/geo/                UK boundaries (committed; the rest of data/ is gitignored)
-langgraph.json           tells `langgraph dev` where the graph is
 ```
 
-### How the modules fit together
-
-Each module is listed under the module that uses it:
-
-```
-studio.py / app/app.py         loads the data and builds the agent
-├── data.py                    loads and cleans the spreadsheets
-│   └── geo.py                 coastline and region checks, distances
-└── graph.py                   the LangGraph agent: Claude with the tools
-    └── tools.py               the functions the AI calls
-        └── similarity.py      age, location and size scores
-            └── geo.py
-```
-
-`config.py` (thresholds and settings) isn't shown: the cleaning, geography and similarity modules all read their
-settings from it.
-
-The two branches meet only at the top: `data.py` produces the cleaned tables, and the agent branch works on them.
-Everything below `graph.py` is plain Python, so `tools.py` and `similarity.py` work without LangGraph or a model
-(from a notebook, the tests or the app).
-
-## Maintenance
-
-`data/geo/uk_boundaries.geojson` (UK land outline and regions, from [Natural Earth](https://www.naturalearthdata.com/),
-public domain) is committed, so there's nothing to build. To refresh it from Natural Earth:
-
-```bash
-uv run python scripts/build_boundaries.py
-```
+Everything below `graph.py` is plain Python: `tools.py` and `similarity.py` work without LangGraph or a model, from
+a notebook, the tests or the app.

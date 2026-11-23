@@ -1,6 +1,6 @@
 """Similarity between a marketed listing and the portfolio, one block at a time (age, location, physical).
 
-Two kinds of score, each between 0 and 1 (DESIGN.md section 2; evidence in notebooks 02-04):
+Two kinds of score, each between 0 and 1 (DESIGN.md section 2; evidence in notebooks/02_similarity):
 
 * **Homogeneity** (prompt 2): how typical the listing is of the portfolio on one block. Each is scaled so the most
   typical value in the portfolio scores 1.
@@ -43,7 +43,7 @@ def usable(df: pd.DataFrame | pd.Series, field: str) -> pd.Series | float:
     return df[field] * np.where(df[f"{field}_doubtful"], np.nan, 1)
 
 
-# --- Age (notebook 02) -------------------------------------------------------------------------------------------
+# --- Age (02_similarity section 1) ------------------------------------------------------------------------------------
 
 
 def get_year_band(year: float | pd.Series, width: int = AGE_BAND_YEARS) -> float | pd.Series:
@@ -84,7 +84,7 @@ def age_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
     return halving(usable(portfolio, "build_year") - year, AGE_HALF_LIFE_YEARS)
 
 
-# --- Location (notebook 03) --------------------------------------------------------------------------------------
+# --- Location (02_similarity section 2) -------------------------------------------------------------------------------
 
 
 def has_usable_location(df: pd.DataFrame | pd.Series) -> pd.Series | bool:
@@ -201,7 +201,7 @@ def location_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Serie
     return halving(miles_to_units(listing, portfolio), LOCATION_HALF_LIFE_MILES)
 
 
-# --- Physical: size (notebook 04) --------------------------------------------------------------------------------
+# --- Physical: size (02_similarity section 3) -------------------------------------------------------------------------
 
 
 def _units_in_window(centres: np.ndarray, sorted_sizes: np.ndarray) -> np.ndarray:
@@ -285,7 +285,7 @@ def size_similarity(listing: pd.Series, portfolio: pd.DataFrame) -> pd.Series:
     return halving(log_ratio, np.log(SIZE_HALF_LIFE_RATIO))
 
 
-# --- Combining the blocks (notebook 05) --------------------------------------------------------------------------
+# --- Combining the blocks (03_answers, prompt 1) ----------------------------------------------------------------------
 
 BLOCKS = ("age", "location", "physical")
 
