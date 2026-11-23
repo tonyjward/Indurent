@@ -226,8 +226,9 @@ def claude_judge(model=None) -> Callable:
 # --- Check 4: the right answer --------------------------------------------------------------------------------------
 
 PROPERTY_ID = re.compile(r"Property Ids?\s*\**\s*(\d+)")
-# An item in a written-out list: "Property Ids 602 (905 sq ft, score 1.0), 689 (905, 0.999) and ...".
-LISTED_IN_TEXT = re.compile(r"(\d+)\s*\(([^)]*)\)")
+# An item in a written-out list: "Property Ids 602 (905 sq ft, 1.0), 689 and 221 (both 905, 0.999), ...". An item
+# may name several Ids that share the bracketed details.
+LISTED_IN_TEXT = re.compile(r"(\d+(?:\s*(?:,|and)\s*\d+)*)\s*\(([^)]*)\)")
 LIST_ITEM = re.compile(r"^\s*(?:\d+[.)]|[-*])\s")
 
 
@@ -236,7 +237,8 @@ def listed_units(answer: str) -> list[tuple[int, str]]:
 
     Units come from table rows (the Property Id column, or "Property Id N" in the row), list items that name a
     Property Id, and sentences that write a list out ("Property Ids 602 (905 sq ft, 1.0), 689 (...), ..."; the
-    brackets stand in for the row). Other prose mentions are left out: they're often a unit picked out of the
+    brackets stand in for the row). A row or item can name several tied units ("| 170, 169, 167 | ... | 9.1 |"),
+    which are taken in the order written, each with that row. Other prose mentions are left out: they're often a unit picked out of the
     list, not the list.
     """
     units = []
@@ -247,7 +249,8 @@ def listed_units(answer: str) -> list[tuple[int, str]]:
             id_column = None  # a table ends at the first line that isn't a row
             written_out = LISTED_IN_TEXT.findall(line)
             if "Property Ids" in line and len(written_out) >= 3:
-                units += [(int(property_id), details) for property_id, details in written_out]
+                for ids, details in written_out:
+                    units += [(int(property_id), details) for property_id in re.findall(r"\d+", ids)]
             elif LIST_ITEM.match(line) and PROPERTY_ID.search(line):
                 units.append((int(PROPERTY_ID.search(line).group(1)), line))
             continue
@@ -259,7 +262,7 @@ def listed_units(answer: str) -> list[tuple[int, str]]:
         if set(text) <= set("|-: "):
             continue  # the line under a table's header
         if id_column is not None and id_column < len(cells) and re.search(r"\d+", cells[id_column]):
-            units.append((int(re.search(r"\d+", cells[id_column]).group()), line))
+            units += [(int(property_id), line) for property_id in re.findall(r"\d+", cells[id_column])]
         elif PROPERTY_ID.search(line):
             units.append((int(PROPERTY_ID.search(line).group(1)), line))
     return units

@@ -249,6 +249,16 @@ def test_listed_units_reads_tables_lists_and_written_out_lists():
     assert [property_id for property_id, _ in listed_units(answer)] == [170, 169, 167, 602, 689, 221]
 
 
+def test_listed_units_reads_tied_units_written_together():
+    # Both formats Claude used in the 2026-11-23-1856 run, which the check first misread as dropped units.
+    table = "| Property Id | Estate | Miles |\n|---|---|---|\n| 170, 169, 167 | Jade Bridge 6 | 9.1 |\n| 168 | Jade Bridge 6 | 9.2 |"
+    assert [property_id for property_id, _ in listed_units(table)] == [170, 169, 167, 168]
+    written = "Property Ids 602 (905 sq ft, score 1.0), 689 and 221 (both 905 sq ft, 0.999), 874 (902, 0.997)."
+    units = listed_units(written)
+    assert [property_id for property_id, _ in units] == [602, 689, 221, 874]
+    assert units[1][1] == units[2][1] == "both 905 sq ft, 0.999"  # tied units share their details
+
+
 def test_ranking_passes_the_right_answer(data):
     reference = NEAREST_M3_FILTERED.reference(data)
     assert [property_id for property_id, _ in reference[:3]] == [170, 169, 167]  # Jade Bridge 6, 9.1 miles

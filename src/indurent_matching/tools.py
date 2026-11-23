@@ -124,11 +124,29 @@ def _listing_facts(listing: pd.Series) -> dict:
     }
 
 
-def _owned_estate_caveat(estate: str, on_list: int, listed: int, pool: pd.DataFrame, filtered: bool, noun: str) -> str:
+def _distance_facts(units: pd.DataFrame) -> str:
+    """How far an estate's units are from a major city, and how many have no usable location, as a sentence."""
+    located = units.dropna(subset=["miles_to_city"])
+    parts = []
+    if len(located):
+        nearest, furthest = round(located["miles_to_city"].min(), 1), round(located["miles_to_city"].max(), 1)
+        miles = f"{nearest}" if nearest == furthest else f"{nearest}-{furthest}"
+        city = located["nearest_city"].mode().iloc[0]
+        parts.append(f"{len(located)} are {miles} miles from {city} (the nearest major city)")
+    unknown = len(units) - len(located)
+    if unknown:
+        parts.append(f"{unknown} {'has' if unknown == 1 else 'have'} no usable location")
+    return f"Of its {len(units)} units, {'; '.join(parts)}."
+
+
+def _owned_estate_caveat(
+    estate: str, on_list: int, listed: int, pool: pd.DataFrame, portfolio: pd.DataFrame, filtered: bool, noun: str
+) -> str:
     """The caveat for a listing on an estate Indurent owns: how many of the results are on it.
 
-    When a filtered search finds none on it, it also says why: the filter removed the estate's units, or they were
-    searched and ranked lower. Without this, the model guessed the reason (eval 2026-11-23).
+    When a filtered search finds none on it, it also says why: the filter removed the estate's units (with their
+    distance from a city and how many have no location, so the model can see which applies), or they were searched
+    and ranked lower. Without these facts, the model guessed the reason (evals 2026-11-23).
     """
     caveat = (
         f"The listing sits on {estate}, an estate Indurent already owns (at least one of its units is within "
@@ -137,7 +155,9 @@ def _owned_estate_caveat(estate: str, on_list: int, listed: int, pool: pd.DataFr
     if filtered and on_list == 0:
         in_pool = int((pool["industrial_estate_name"] == estate).sum())
         if in_pool == 0:
-            caveat += f" None of {estate}'s units are in the filtered set: the filter removed them."
+            units = portfolio[portfolio["industrial_estate_name"] == estate]
+            caveat += f" None of {estate}'s units are in the filtered set: the filter removed them. "
+            caveat += _distance_facts(units)
         else:
             caveat += f" {in_pool} of its units are in the filtered set but rank below these."
     return caveat
@@ -463,7 +483,8 @@ def find_similar(
     estate = sits_on_estate(row, data.portfolio)
     if estate:
         on_estate = int((result["industrial_estate_name"] == estate).sum())
-        caveats.append(_owned_estate_caveat(estate, on_estate, len(result), pool, candidates is not None, "matches"))
+        filtered = candidates is not None
+        caveats.append(_owned_estate_caveat(estate, on_estate, len(result), pool, data.portfolio, filtered, "matches"))
 
     # Some matches have no usable location, so they scored 0 on it.
     if "location" in dimensions["matched_on"]:
@@ -668,14 +689,15 @@ def find_nearest(data: Data, listing: str, k: int = 10, candidates: list[int] | 
         if as_near > k:
             caveats.append(
                 f"{as_near} units are {last} miles or nearer (to 1 decimal place), so these {k} aren't the only "
-                "ones that near."
+                "ones that near. Units that show the same distance are listed in order of their exact distance."
             )
 
     # The listing sits on an estate Indurent owns: say so, and how many of the nearest are on it.
     estate = sits_on_estate(row, data.portfolio)
     if estate:
         on_estate = sum(match["estate"] == estate for match in matches)
-        caveats.append(_owned_estate_caveat(estate, on_estate, len(matches), pool, candidates is not None, "nearest"))
+        filtered = candidates is not None
+        caveats.append(_owned_estate_caveat(estate, on_estate, len(matches), pool, data.portfolio, filtered, "nearest"))
 
     # The search was over a filtered set, not the whole portfolio.
     if candidates is not None:

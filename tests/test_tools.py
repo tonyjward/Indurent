@@ -190,6 +190,7 @@ def test_find_nearest_whole_portfolio_and_unplaceable_listings(data):
     assert any("358 of the 1,250 units" in c for c in out["caveats"])  # unknown locations can't be ranked
     assert any("Keeping or dropping them can't change this list" in c for c in out["caveats"])
     # Velvet Park 60 has more units at 0.0 miles than the 10 listed: say so (eval 2026-11-23).
+    assert "Units that show the same distance are listed in order of their exact distance" in " ".join(out["caveats"])
     assert "25 units are 0.0 miles or nearer (to 1 decimal place), so these 10 aren't the only ones that near" in (
         " ".join(out["caveats"])
     )
@@ -217,11 +218,21 @@ def test_get_homogeneity_scores_prompt_2(data):
 def test_owned_estate_caveat_says_why_none_are_listed():
     from indurent_matching.tools import _owned_estate_caveat
 
-    pool = pd.DataFrame({"industrial_estate_name": ["Velvet Park 60", "Jade Bridge 6"]})
-    without = pool[pool["industrial_estate_name"] != "Velvet Park 60"]
-    removed = _owned_estate_caveat("Velvet Park 60", 0, 10, without, filtered=True, noun="nearest")
-    assert removed.endswith("None of Velvet Park 60's units are in the filtered set: the filter removed them.")
-    ranked_lower = _owned_estate_caveat("Velvet Park 60", 0, 10, pool, filtered=True, noun="nearest")
-    assert ranked_lower.endswith("1 of its units are in the filtered set but rank below these.")
-    unfiltered = _owned_estate_caveat("Velvet Park 60", 0, 10, pool, filtered=False, noun="nearest")
+    portfolio = pd.DataFrame(
+        {
+            "industrial_estate_name": ["Velvet Park 60", "Velvet Park 60", "Velvet Park 60", "Jade Bridge 6"],
+            "miles_to_city": [13.9, 14.0, None, 7.1],
+            "nearest_city": ["Manchester", "Manchester", None, "Manchester"],
+        }
+    )
+    without = portfolio[portfolio["industrial_estate_name"] != "Velvet Park 60"]
+    removed = _owned_estate_caveat("Velvet Park 60", 0, 10, without, portfolio, filtered=True, noun="nearest")
+    # The facts to see why (eval 2026-11-23): too far from a city, or no location at all.
+    assert removed.endswith(
+        "None of Velvet Park 60's units are in the filtered set: the filter removed them. Of its 3 units, "
+        "2 are 13.9-14.0 miles from Manchester (the nearest major city); 1 has no usable location."
+    )
+    ranked_lower = _owned_estate_caveat("Velvet Park 60", 0, 10, portfolio, portfolio, filtered=True, noun="nearest")
+    assert ranked_lower.endswith("3 of its units are in the filtered set but rank below these.")
+    unfiltered = _owned_estate_caveat("Velvet Park 60", 0, 10, portfolio, portfolio, filtered=False, noun="nearest")
     assert unfiltered.endswith("0 of the 10 nearest are on it.")  # no reason needed without a filter
